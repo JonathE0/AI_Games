@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fragline — 1v1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+<script type="importmap">{ "imports": { "three": "/lib/three/build/three.module.js", "three/addons/": "/lib/three/examples/jsm/" } }</script>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" hidden>
+  <div id="topbar">
+    <div class="team me"><span id="scoreMe">0</span><small id="nameMe">YOU</small></div>
+    <div id="clock"><div id="timer">--:--</div><div id="roundNo">WARMUP</div></div>
+    <div class="team them"><span id="scoreThem">0</span><small id="nameThem">WAITING…</small></div>
+  </div>
+  <div id="money">$0<small id="moneySub"></small></div>
+  <div id="killfeed"></div>
+  <div id="banner"><div id="bannerTitle"></div><div id="bannerSub"></div></div>
+  <div id="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="dot"></i></div>
+  <div id="hitDirs"></div>
+  <div id="vitals">
+    <div class="vital"><b id="hp">100</b><span>HEALTH</span></div>
+    <div class="vital"><b id="armor">0</b><span id="armorLabel">ARMOR</span></div>
+  </div>
+  <div id="ammoBox">
+    <div id="ammo"><b id="mag">0</b><span id="reserve">/ 0</span></div>
+    <div id="weaponName">—</div>
+    <div id="slots"></div>
+  </div>
+  <div id="hint"></div>
+  <div id="chatlog"></div>
+  <input id="chatInput" maxlength="120" hidden placeholder="Say something… (Enter to send, Esc to cancel)">
+  <div id="netinfo"></div>
+</div>
+
+<div id="scope" hidden></div>
+<div id="vignette"></div>
+<div id="flash"></div>
+<div id="deathCam" hidden></div>
+
+<div id="roundEnd" hidden><h2 id="reTitle"></h2><p id="reReason"></p><p class="rep" id="reGiven"></p><p class="rep" id="reTaken"></p></div>
+
+<div id="buyMenu" hidden>
+  <div class="panel">
+    <header><h2>BUY</h2><span id="buyMoney"></span><span id="buyTimer"></span><span class="close">B or ESC to close</span></header>
+    <div id="buyGrid"></div>
+  </div>
+</div>
+
+<div id="scoreboard" hidden>
+  <table>
+    <thead><tr><th>PLAYER</th><th>ROUNDS</th><th>K</th><th>D</th><th>DMG</th><th>PING</th></tr></thead>
+    <tbody id="sbBody"></tbody>
+  </table>
+  <div class="meta" id="sbMeta"></div>
+</div>
+
+<div id="menu">
+  <div class="menuPanel">
+    <h1>FRAG<span>LINE</span></h1>
+    <p class="tag">1v1 tactical shooter</p>
+    <label>Name <input id="nameInput" maxlength="16" placeholder="Your name"></label>
+    <div class="row"><button id="btnQuick" class="primary">Quick Match</button><button id="btnCreate">Private Room</button></div>
+    <div class="row"><button id="btnHuntsman" class="primary">Flying Huntsman · Private Room</button></div>
+    <p class="tag">Lake · low gravity · SSG 08 + knife</p>
+    <div class="row"><input id="codeInput" placeholder="CODE" maxlength="4"><button id="btnJoin">Join Room</button></div>
+    <div class="row">
+      <select id="diffSelect"><option value="easy">Easy bot</option><option value="medium" selected>Medium bot</option><option value="hard">Hard bot</option></select>
+      <button id="btnBot">Play vs Bot</button>
+    </div>
+    <div id="menuMsg"></div>
+    <details class="controls">
+      <summary>Controls</summary>
+      <table>
+        <tr><td>WASD</td><td>Move</td></tr>
+        <tr><td>Shift</td><td>Walk (silent, accurate)</td></tr>
+        <tr><td>Ctrl / C</td><td>Crouch</td></tr>
+        <tr><td>Space</td><td>Jump</td></tr>
+        <tr><td>Left click</td><td>Fire / knife slash</td></tr>
+        <tr><td>Right click</td><td>Scope / knife stab</td></tr>
+        <tr><td>R</td><td>Reload</td></tr>
+        <tr><td>F</td><td>Inspect weapon</td></tr>
+        <tr><td>1 / 2 / 3, Q, wheel</td><td>Primary / pistol / knife, last weapon</td></tr>
+        <tr><td>B</td><td>Buy menu (buy phase)</td></tr>
+        <tr><td>Tab</td><td>Scoreboard</td></tr>
+        <tr><td>Enter</td><td>Chat</td></tr>
+        <tr><td>Esc</td><td>Pause / settings</td></tr>
+      </table>
+      <p>Hold jump to bunny hop — strafe (A/D) while turning to build speed. Every key can be rebound in Settings → Key bindings.</p>
+    </details>
+  </div>
+  <div class="menuPanel settingsPanel" id="settings"></div>
+</div>
+
+<div id="pause" hidden>
+  <div class="menuPanel">
+    <h2>PAUSED</h2>
+    <div id="roomInfo"></div>
+    <button id="btnResume" class="primary">Resume</button>
+    <button id="btnLeave">Leave match</button>
+    <p class="pauseHint">Esc resumes in fullscreen · hold Esc to leave fullscreen</p>
+  </div>
+</div>
+
+<div id="vcursor" hidden></div>
+
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>
