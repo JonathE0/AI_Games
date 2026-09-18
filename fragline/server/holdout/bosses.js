@@ -1,9 +1,10 @@
 // Boss waves after the Colossus (skyboss.js):
-//  - wave 10 (25, 40…): the Brood Titan. Announced at the wave start, it arrives once the regular horde is
-//    cleared: a giant that stomps builds flat, carrying riders that throw acid and can't be hurt until they
-//    leap off (two immediately, then every ~12 s) or the Titan dies. It also drops fresh runners/stalkers off
-//    its back every 8 s, and carries two permanent Sniper Riders that never dismount on their own and snipe
-//    like a ground Sniper.
+//  - wave 10 (25, 40…): two Brood Titans, from different lanes. Announced at the wave start, they arrive once
+//    the regular horde is cleared: giants that stomp builds flat, carrying riders that throw acid and can't be
+//    hurt until they leap off (two immediately, then every ~12 s) or their Titan dies. Each also drops fresh
+//    runners/stalkers off its back every 8 s, and carries two permanent Sniper Riders that never dismount on
+//    their own and snipe like a ground Sniper. Each Titan runs at 75% of the old solo HP (tougher overall, but
+//    not twice as long) and drops its own Brood Launcher.
 //  - wave 15 (30, 45…): the Maw. A colossal worm that hunts underground and erupts under builds and players.
 //    Seismic thumpers in the houses lure it up with its mouth open (its gullet takes triple damage); below
 //    60 % it spews stalkers, below 25 % it tries to devour the Core unless the team interrupts it.
@@ -16,90 +17,103 @@ import { addHazard, onBeam } from './behaviors.js';
 
 const r2 = v => Math.round(v * 100) / 100;
 export const MAW = {
-  hp: 12000, speed: 6.5, eruptR: 4.2, eruptDmg: 35, eruptSdmg: 900, warn: 1500, lure: 10000, thumpHold: 5000, pulse: 20000,
+  hp: 48000, speed: 6.5, eruptR: 4.2, eruptDmg: 35, eruptSdmg: 900, warn: 1500, lure: 10000, thumpHold: 5000, pulse: 20000,
   gulletR: 1.6, gulletY: 7.5, bodyR: 3.6, devourWind: 12000, devourDmg: 0.4, devourBreak: 0.08, coreR: 5,
 };
 // last 2 seats are reserved for the permanent Sniper Riders (see 'fighting' below) — never handed to normal riders
 const RIDER_SEATS = [[-0.35, 0.18], [0.35, 0.18], [0, 0.36], [-0.3, -0.05], [0.3, -0.05], [0, 0.05], [-0.2, 0.3], [0.2, 0.3], [-0.15, -0.22], [0.15, -0.22]];
 const SNIPER_SEATS = 2;
 const RIDER_DROP = 12000, MINION_DROP = 8000;
+const TITAN_COUNT = 2, TITAN_HP_SHARE = 0.75; // wave 10 (25, 40…): two Titans, each at 75% of the old solo HP
 
 export class Bosses {
   constructor(room) { this.room = room; this.reset(); }
 
   reset() {
-    this.titan = null;        // { phase: 'waiting' | 'coming' | 'fighting', z, at }
+    this.titans = [];          // [{ phase: 'waiting' | 'coming' | 'fighting' | 'dead', w, at, z }] — always 2 on a Titan wave
     this.maw = null;
     this.thumpers = [];
     this.smith = false;       // the Blacksmith unlocks once wave 7 is cleared (see room.js waveCleared)
   }
 
   // wave director asks: may the wave end?
-  busy() { return !!(this.titan && this.titan.phase !== 'dead') || !!(this.maw && !this.maw.dead); }
+  busy() { return this.titans.some(t => t.phase !== 'dead') || !!(this.maw && !this.maw.dead); }
 
   onWave(w, now = Date.now()) {
     const room = this.room, boss = bossFor(w);
     if (boss === 'titan') {
-      this.titan = { phase: 'waiting', w, at: 0, z: null };
-      room.broadcast({ t: 'task', text: 'THE BROOD TITAN is coming once this wave is cleared — build strong, save rockets' });
+      this.titans = Array.from({ length: TITAN_COUNT }, () => ({ phase: 'waiting', w, at: 0, z: null }));
+      room.broadcast({ t: 'task', text: 'TWO BROOD TITANS are coming once this wave is cleared — build strong, save rockets' });
     } else if (boss === 'maw') this.startMaw(w, now);
   }
 
   update(dt, now) {
     const room = this.room;
     if (room.phase !== 'wave') return;
-    if (this.titan) this.updateTitan(dt, now);
+    if (this.titans.length) this.updateTitans(now);
     if (this.maw && !this.maw.dead) this.updateMaw(dt, now);
     this.updateThumpers(now);
   }
 
-  // ---------- Brood Titan ----------
-  updateTitan(dt, now) {
-    const room = this.room, T = this.titan;
-    if (T.phase === 'waiting') {
+  // ---------- Brood Titan(s) ----------
+  updateTitans(now) {
+    const room = this.room;
+    if (this.titans.every(t => t.phase === 'waiting')) { // both wait for the same regular horde to clear
       const horde = room.director.remaining + [...room.zombies.values()].filter(z => !z.t.boss).length;
-      if (horde === 0) { T.phase = 'coming'; T.at = now + 5000; room.broadcast({ t: 'boss', ev: 'titanwarn', ms: 5000 }); }
-    } else if (T.phase === 'coming' && now >= T.at) {
-      T.phase = 'fighting';
-      const lane = room.director.lanes[0] ?? 'N';
-      const z = room.spawnZombie('titan', lane, '');
-      z.maxHp = z.hp = Math.round(ZTYPES.titan.hp * (1 + 0.6 * (room.activeCount() - 1)) * (1 + 0.5 * bossCycle(T.w)));
-      T.z = z;
-      T.nextDrop = now + RIDER_DROP;
-      T.nextMinion = now + MINION_DROP;
-      z.riders = [];
-      const n = Math.min(RIDER_SEATS.length - SNIPER_SEATS, 4 + room.activeCount());
-      for (let i = 0; i < n; i++) {
-        const r = room.spawnZombie('rider', lane, '');
-        r.mount = z.id; r.seat = RIDER_SEATS[i]; r.nextAtk = now + 3000 + i * 500;
-        z.riders.push(r);
+      if (horde === 0) {
+        for (const t of this.titans) { t.phase = 'coming'; t.at = now + 5000; }
+        room.broadcast({ t: 'boss', ev: 'titanwarn', ms: 5000, n: this.titans.length });
       }
-      for (let i = 0; i < SNIPER_SEATS; i++) { // permanent: never dismount on their own, snipe once they fall
-        const r = room.spawnZombie('broodsniper', lane, '');
-        r.mount = z.id; r.seat = RIDER_SEATS[RIDER_SEATS.length - SNIPER_SEATS + i]; r.nextAtk = now + 4000 + i * 1200; r.permanent = true;
-        z.riders.push(r);
-      }
-      room.broadcast({ t: 'boss', ev: 'titan', id: z.id, riders: z.riders.map(r => r.id) });
-      // two riders leap down and start fighting the moment it arrives, instead of waiting for the first cycle
-      const first = z.riders.filter(r => !r.permanent);
-      for (const r of first.slice(0, 2)) this.dismount(r, now, false);
-    } else if (T.phase === 'fighting') {
-      const z = T.z;
-      if (z.dead) {
-        T.phase = 'dead';
-        for (const r of z.riders) if (!r.dead && r.mount) this.dismount(r, now, true);
-        room.inventory.scatter([{ kind: 'gun', w: 'broodlauncher', r: 4, tier: 3, el: null }], [z.pos[0], z.pos[1], z.pos[2]], 2.4, true);
-        room.broadcast({ t: 'msg', text: 'The Brood Titan dropped the Brood Launcher!' });
-        room.broadcast({ t: 'boss', ev: 'titandie', by: z.lastHitBy ?? null });
-        return;
-      }
-      if (now >= T.nextDrop) { // one or two (non-permanent) riders leap down to fight
-        T.nextDrop = now + RIDER_DROP;
-        const mounted = z.riders.filter(r => !r.dead && r.mount && !r.permanent);
-        for (const r of mounted.slice(0, 1 + (Math.random() < 0.5 ? 1 : 0))) this.dismount(r, now, false);
-      }
-      if (now >= T.nextMinion) { this.dropMinions(z, now); T.nextMinion = now + MINION_DROP; }
     }
+    this.titans.forEach((t, i) => {
+      if (t.phase === 'coming' && now >= t.at) this.spawnTitan(t, i, now);
+      else if (t.phase === 'fighting') this.fightTitan(t, now);
+    });
+  }
+
+  spawnTitan(t, idx, now) {
+    const room = this.room;
+    t.phase = 'fighting';
+    const lanes = room.director.lanes.length ? room.director.lanes : ['N'], lane = lanes[idx % lanes.length];
+    const z = room.spawnZombie('titan', lane, '');
+    z.maxHp = z.hp = Math.round(ZTYPES.titan.hp * TITAN_HP_SHARE * (1 + 0.6 * (room.activeCount() - 1)) * (1 + 0.5 * bossCycle(t.w)));
+    t.z = z;
+    t.nextDrop = now + RIDER_DROP;
+    t.nextMinion = now + MINION_DROP;
+    z.riders = [];
+    const n = Math.min(RIDER_SEATS.length - SNIPER_SEATS, 4 + room.activeCount());
+    for (let i = 0; i < n; i++) {
+      const r = room.spawnZombie('rider', lane, '');
+      r.mount = z.id; r.seat = RIDER_SEATS[i]; r.nextAtk = now + 3000 + i * 500;
+      z.riders.push(r);
+    }
+    for (let i = 0; i < SNIPER_SEATS; i++) { // permanent: never dismount on their own, snipe once they fall
+      const r = room.spawnZombie('broodsniper', lane, '');
+      r.mount = z.id; r.seat = RIDER_SEATS[RIDER_SEATS.length - SNIPER_SEATS + i]; r.nextAtk = now + 4000 + i * 1200; r.permanent = true;
+      z.riders.push(r);
+    }
+    room.broadcast({ t: 'boss', ev: 'titan', id: z.id, riders: z.riders.map(r => r.id) });
+    // two riders leap down and start fighting the moment it arrives, instead of waiting for the first cycle
+    const first = z.riders.filter(r => !r.permanent);
+    for (const r of first.slice(0, 2)) this.dismount(r, now, false);
+  }
+
+  fightTitan(t, now) {
+    const room = this.room, z = t.z;
+    if (z.dead) {
+      t.phase = 'dead';
+      for (const r of z.riders) if (!r.dead && r.mount) this.dismount(r, now, true);
+      room.inventory.scatter([{ kind: 'gun', w: 'broodlauncher', r: 4, tier: 3, el: null }], [z.pos[0], z.pos[1], z.pos[2]], 2.4, true);
+      room.broadcast({ t: 'msg', text: 'A Brood Titan dropped the Brood Launcher!' });
+      room.broadcast({ t: 'boss', ev: 'titandie', id: z.id, by: z.lastHitBy ?? null, left: this.titans.filter(o => o.phase !== 'dead').length });
+      return;
+    }
+    if (now >= t.nextDrop) { // one or two (non-permanent) riders leap down to fight
+      t.nextDrop = now + RIDER_DROP;
+      const mounted = z.riders.filter(r => !r.dead && r.mount && !r.permanent);
+      for (const r of mounted.slice(0, 1 + (Math.random() < 0.5 ? 1 : 0))) this.dismount(r, now, false);
+    }
+    if (now >= t.nextMinion) { this.dropMinions(z, now); t.nextMinion = now + MINION_DROP; }
   }
 
   // 2 fresh runners/stalkers fall off the Titan's back while it lives.

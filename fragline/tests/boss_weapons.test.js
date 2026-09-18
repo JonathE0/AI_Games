@@ -128,9 +128,10 @@ test('boss weapons: each boss drops its unique gun', () => {
   assert.ok(dropped('skybreaker'), 'the Colossus drops the Skybreaker');
 
   const titanZ = room.spawnZombie('titan', 'N', ''); titanZ.riders = [];
-  room.bosses.titan = { phase: 'fighting', z: titanZ, w: 10, nextDrop: T + 1e9 };
+  const titanState = { phase: 'fighting', z: titanZ, w: 10, nextDrop: T + 1e9, nextMinion: T + 1e9 };
+  room.bosses.titans = [titanState];
   room.killZombie(titanZ, p, 'rocket');
-  room.bosses.updateTitan(0.05, T);
+  room.bosses.fightTitan(titanState, T);
   assert.ok(dropped('broodlauncher'), 'the Brood Titan drops the Brood Launcher');
 
   room.bosses.startMaw(15, T);

@@ -4,7 +4,7 @@
 import { WEAPONS } from '../../shared/weapons.js';
 import { AMMO, AMMO_IDS, ITEMS, POWERUPS, MAT_CAP, MONEY_CAP, SHOP_RARITY, START_AMMO, shopEntry, ammoCap, elementPrice, RARITY, rarityCost, sellPrice, itemValue, TEAM_UPS } from '../../shared/holdout.js';
 import { ELEMENTS } from '../../shared/elements.js';
-import { INV_SIZE, HOTBAR, STASH_SIZE, SACK_SIZE, ARMOR, ARMOR_SLOTS, ATTACH, stackMax, magFor, kindOf, placeItem, countIn, tierCost, itemName, isConsumable } from '../../shared/items.js';
+import { INV_SIZE, HOTBAR, STASH_SIZE, SACK_SIZE, ARMOR, ARMOR_SLOTS, ATTACH, stackMax, magFor, kindOf, placeItem, countIn, tierCost, itemName, isConsumable, fits } from '../../shared/items.js';
 import { MAT_IDS } from '../../shared/build.js';
 import { nextUid } from '../baseRoom.js';
 
@@ -91,21 +91,6 @@ function parseRef(ref) {
   return null;
 }
 
-// Would `item` fit into `slots` without mutating anything? Mirrors placeItem's stacking + free-slot rules.
-function fitsIn(slots, item) {
-  const max = stackMax(item);
-  if (max > 1) {
-    let left = item.n ?? 1;
-    for (const it of slots) {
-      if (it && it.id === item.id && it.kind === item.kind && it.n < max) left -= Math.min(max - it.n, left);
-      if (left <= 0) return true;
-    }
-  }
-  return slots.some(s => !s);
-}
-// Same, but checks the sack first for consumables (mirrors giveItem's placement order).
-const fits = (p, item) => (p.sack && isConsumable(item) && fitsIn(p.sack, item)) || fitsIn(p.inv, item);
-
 export class Inventory {
   constructor(room) {
     this.room = room;
@@ -170,6 +155,7 @@ export class Inventory {
       if (!left) { room.send(p, { t: 'got', it }); return true; }
       if (it.kind === 'gun' || stackMax(it) === 1) {
         const slot = held >= 0 && held < HOTBAR ? held : 0, old = p.inv[slot];
+        if (old?.locked) { room.send(p, { t: 'deny', text: 'Inventory full — the item in your hand is locked' }); return false; }
         p.inv[slot] = it;
         if (old) this.dropNear(p, old);
         room.send(p, { t: 'got', it });
@@ -221,16 +207,16 @@ export class Inventory {
 
   // m: { from, to } slot refs. Swaps, merges stacks, equips armor, and drops attachments onto guns.
   onMove(p, m) {
-    const a = parseRef(m.from), b = parseRef(m.to), room = this.room;
+    const a = parseRef(m.from), b = parseRef(m.to), room = this.room, deny = text => room.send(p, { t: 'deny', text });
     if (!a || !b || !p.alive || (a.box === b.box && a.key === b.key)) return;
-    if ((a.box === 's' || b.box === 's') && !this.nearStash(p)) return room.send(p, { t: 'deny', text: 'Stand next to the team chest' });
+    if ((a.box === 's' || b.box === 's') && !this.nearStash(p)) return deny('Stand next to the team chest');
     const src = this.get(p, a), dst = this.get(p, b);
     if (!src) return;
     // Colossus-wave chest snipers: one per player per wave (see giveChestSnipers) — normal chest rules otherwise
     const takingChestSniper = a.box === 's' && b.box !== 's' && src.kind === 'gun' && src.chestGift;
-    if (takingChestSniper && room.chestSniperTaken?.has(p.id)) return room.send(p, { t: 'deny', text: 'You already grabbed a sniper from the chest this wave' });
-    if (b.box === 'k' && !isConsumable(src)) return room.send(p, { t: 'deny', text: 'The sack only holds heals, shields and adrenaline' });
-    // an attachment dropped on a gun gets fitted (whatever was in that slot comes back)
+    if (takingChestSniper && room.chestSniperTaken?.has(p.id)) return deny('You already grabbed a sniper from the chest this wave');
+    if (b.box === 'k' && !isConsumable(src)) return deny('The sack only holds heals, shields and adrenaline');
+    // an attachment dropped on a gun gets fitted (whatever was in that slot comes back) — an upgrade, so a lock on either side doesn't block it
     if (src.kind === 'attach' && dst?.kind === 'gun' && b.box !== 'a') {
       const slot = ATTACH[src.id].slot, old = dst.att?.[slot];
       dst.att = { ...dst.att, [slot]: src.id };
@@ -240,9 +226,10 @@ export class Inventory {
       room.send(p, { t: 'msg', text: `${ATTACH[src.id].name} fitted` });
       return this.changed(p, a, b);
     }
+    if (src.locked || dst?.locked) return deny('Locked — press L to unlock');
     // armor only goes into its own slot
-    if (b.box === 'a' && (src.kind !== 'armor' || ARMOR[src.id].slot !== b.key)) return room.send(p, { t: 'deny', text: 'That goes in another slot' });
-    if (a.box === 'a' && dst && (dst.kind !== 'armor' || ARMOR[dst.id].slot !== a.key)) return room.send(p, { t: 'deny', text: 'That goes in another slot' });
+    if (b.box === 'a' && (src.kind !== 'armor' || ARMOR[src.id].slot !== b.key)) return deny('That goes in another slot');
+    if (a.box === 'a' && dst && (dst.kind !== 'armor' || ARMOR[dst.id].slot !== a.key)) return deny('That goes in another slot');
     // merge stacks of the same thing
     if (dst && dst.id === src.id && dst.kind === src.kind && stackMax(dst) > 1) {
       const k = Math.min(stackMax(dst) - dst.n, src.n);
@@ -265,6 +252,7 @@ export class Inventory {
     if (!r || r.box === 's' || !p.alive || p.downed) return;
     const it = this.get(p, r);
     if (!it) return;
+    if (it.locked) return this.room.send(p, { t: 'deny', text: 'Locked — press L to unlock' });
     const n = Math.max(1, Math.min(it.n ?? 1, m.n | 0 || it.n || 1));
     let out = it;
     if ((it.n ?? 1) > n) { it.n -= n; out = { ...it, uid: nextUid(), n }; }
@@ -277,6 +265,18 @@ export class Inventory {
 
   // old "drop the gun in your hand" message: { slot (hotbar index), mag }
   onDropGun(p, m) { this.onDrop(p, { from: 'i' + (m.slot | 0), mag: m.mag }); }
+
+  // m: { ref } — toggle a lock that blocks selling, dropping, moving/swapping and team-chest transfers of
+  // that item until unlocked again. Upgrades (rarity, tier, the Blacksmith) still work on a locked item.
+  onLock(p, m) {
+    const r = parseRef(m.ref);
+    if (!r || !p.alive) return;
+    const it = this.get(p, r);
+    if (!it) return;
+    it.locked = !it.locked;
+    this.room.sendInv(p);
+    this.room.send(p, { t: 'msg', text: `${itemName(it)} ${it.locked ? 'locked' : 'unlocked'}` });
+  }
 
   // ---------- reloading from the backpack ----------
   onReload(p, m) {
@@ -300,8 +300,10 @@ export class Inventory {
     if (payer.money < price) return deny(bank ? 'The team bank is short' : 'Not enough money');
     if (e.kind === 'gun') {
       const g = makeGun(id, SHOP_RARITY, 1, withEl); // duplicates are fine: a free hotbar slot, else the backpack, else swap
+      const i = slot >= 0 && slot < HOTBAR ? slot : 0;
+      if (!fits(p.inv, p.sack, g) && p.inv[i]?.locked) return deny('Inventory full — the item in your hand is locked');
       if (giveItem(p, g)) { // full: swap with the gun in hand
-        const i = slot >= 0 && slot < HOTBAR ? slot : 0, old = p.inv[i];
+        const old = p.inv[i];
         p.inv[i] = g;
         if (old) this.dropNear(p, old);
       }
@@ -375,6 +377,7 @@ export class Inventory {
     if (idx < 0 && p.sack) { idx = p.sack.findIndex(x => x?.uid === m.uid); from = p.sack; }
     if (idx < 0) return;
     const it = from[idx], price = sellPrice(it);
+    if (it.locked) return deny('Locked — press L to unlock');
     from[idx] = null;
     p.money = Math.min(MONEY_CAP, p.money + price);
     p.buyback = { item: it, price }; // only the last sale is kept
@@ -388,7 +391,7 @@ export class Inventory {
     if (!bb) return;
     if (!this.nearBanker(p)) return deny('Talk to the Banker to sell');
     if (p.money < bb.price) return deny('Not enough money');
-    if (!fits(p, bb.item)) return deny('Inventory full');
+    if (!fits(p.inv, p.sack, bb.item)) return deny('Inventory full');
     p.money -= bb.price;
     giveItem(p, bb.item);
     p.buyback = null;
@@ -408,16 +411,19 @@ export class Inventory {
     payer.money -= cost;
     room.teamUps[m.id] = level + 1;
     if (m.id === 'vitality') {
-      for (const q of room.players) {
+      for (const q of room.players) { // sends p its own updated money too, along with everyone's new max HP
         const old = q.maxHp || 0;
         q.maxHp = room.maxHpFor(q);
         if (q.alive) q.hp += q.maxHp - old;
         room.sendInv(q);
       }
-    } else if (m.id === 'engineering') {
-      const ratio = (1 + 0.1 * (level + 1)) / (1 + 0.1 * level);
-      for (const s of room.builds()) { s.maxHp = Math.round(s.maxHp * ratio); s.hp = Math.min(s.maxHp, s.hp * ratio); room.dirtyPieces.add(s); }
-      room.flowDirty = true;
+    } else {
+      if (m.id === 'engineering') {
+        const ratio = (1 + 0.1 * (level + 1)) / (1 + 0.1 * level);
+        for (const s of room.builds()) { s.maxHp = Math.round(s.maxHp * ratio); s.hp = Math.min(s.maxHp, s.hp * ratio); room.dirtyPieces.add(s); }
+        room.flowDirty = true;
+      }
+      room.sendInv(p); // otherwise only the buyer's money moved — refresh it right away (every panel reads from here)
     }
     room.broadcast({ t: 'msg', text: `${p.name} upgraded team ${up.name} to level ${level + 1}` });
     room.broadcast({ t: 'teamups', ups: room.teamUps });

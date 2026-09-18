@@ -24,9 +24,9 @@ function join(room, name = 'P') {
   return { player, messages, last: t => messages.filter(m => m.t === t).at(-1), all: t => messages.filter(m => m.t === t) };
 }
 
-test('sniper zombies: nerfed damage and a longer telegraph, Brood Sniper Riders match', () => {
-  assert.deepEqual([ZTYPES.sniper.dmg, ZTYPES.sniper.npcDmg, ZTYPES.sniper.windup], [22, 45, 2.2]);
-  assert.deepEqual([ZTYPES.broodsniper.dmg, ZTYPES.broodsniper.npcDmg, ZTYPES.broodsniper.windup], [22, 45, 2.2]);
+test('sniper zombies: +30% damage over the old nerf, same telegraph, Brood Sniper Riders match', () => {
+  assert.deepEqual([ZTYPES.sniper.dmg, ZTYPES.sniper.npcDmg, ZTYPES.sniper.windup], [29, 58, 2.2]);
+  assert.deepEqual([ZTYPES.broodsniper.dmg, ZTYPES.broodsniper.npcDmg, ZTYPES.broodsniper.windup], [29, 58, 2.2]);
 });
 
 test('a Sniper zombie traces the exact laser it showed: stepping out dodges it, staying in it does not', () => {
@@ -56,7 +56,7 @@ test('a Sniper zombie traces the exact laser it showed: stepping out dodges it, 
   assert.ok(a.all('zaim').length >= 2, 'second telegraph');
   const hpBefore2 = q.hp;
   advance(room, 2200);
-  assert.equal(hpBefore2 - q.hp, Math.round(22 * dmgMult(8)), 'stayed on the beam: hit for the nerfed base damage');
+  assert.equal(hpBefore2 - q.hp, Math.round(29 * dmgMult(8)), 'stayed on the beam: hit for the buffed base damage');
 });
 
 test('Brood Sniper Riders share the same locked-beam logic once dismounted', () => {

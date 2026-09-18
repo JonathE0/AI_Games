@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { makeGun, addItem, countOf } from '../server/holdout/inventory.js';
 import { HoldoutRoom } from '../server/holdout/room.js';
 import { GRID, pieceBoxes, validMask, doorOf } from '../shared/build.js';
-import { AMMO, ITEMS, intermissionFor } from '../shared/holdout.js';
+import { AMMO, ITEMS, intermissionFor, MONEY_CAP } from '../shared/holdout.js';
 import { SKY, skyPoint } from '../shared/skyboss.js';
 import { OUTPOST, OUTPOST_SHELTERS } from '../shared/outpost.js';
 import { WEAPONS } from '../shared/weapons.js';
@@ -284,6 +284,20 @@ test('supply drops fall, land and spill loot; chests too; breaks get longer', ()
   room.handle(p, { t: 'open', kind: 'chest', id: c.id });
   assert.ok(room.inventory.pickups.size > n);
   assert.ok(intermissionFor(8) > intermissionFor(2) + 30000);
+});
+
+test('money cap is $50,000: kill rewards, assists, wave clears and boss kills all respect it', () => {
+  assert.equal(MONEY_CAP, 50000);
+  const room = started(new HoldoutRoom('MC', {}));
+  const a = join(room, 'A'), p = a.player;
+  p.money = MONEY_CAP - 10;
+  room.startWave(1); room.director.queue = [];
+  const z = room.spawnZombie('alpha', 'N', '');
+  room.killZombie(z, p, 'ar');
+  assert.equal(p.money, MONEY_CAP, 'a big reward is clamped to the cap, not overflowed past it');
+  room.wave = 1;
+  room.waveCleared();
+  assert.equal(p.money, MONEY_CAP, 'the wave-clear payout is clamped too');
 });
 
 test('holdout guns: Fortnite-style roster with double magazines, snipers kept', () => {

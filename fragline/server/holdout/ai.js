@@ -6,6 +6,7 @@ import { distToBox, boxCenter } from '../../shared/build.js';
 import { AGGRO } from '../../shared/zombies.js';
 import { SURVIVOR_CLASSES } from '../../shared/holdout.js';
 import { stepSniper, tryBurrow, stepBurrow, onMeleeHit } from './behaviors.js';
+import { stepFlyer } from './flyers.js';
 
 export const ZS = { MOVE: 0, WIND: 1, STRIKE: 2, LOB: 3 }; // also the animation state sent to clients
 export const GLOB_GRAVITY = 12;
@@ -33,7 +34,7 @@ export function updateZombies(room, dt, now) {
 }
 
 function think(room, z, now) {
-  if (z.t.noAggro || now < z.aggroBlock) { z.aggro = null; return; } // Core Seekers never chase players
+  if (z.t.noAggro || z.berserk || now < z.aggroBlock) { z.aggro = null; return; } // Core Seekers/berserk stragglers never chase players — they beeline for the Core
   const t = z.t, pos = z.pos, eye = [pos[0], pos[1] + 1.6 * z.s, pos[2]];
   let best = null, bd = t.ranged ? t.range : (t.aggro ?? AGGRO) + (now - z.hurtAt < 3000 ? 8 : 0);
   for (const p of room.targets()) { // players and survivors
@@ -107,6 +108,7 @@ function step(room, z, dt, now, hash) {
     return;
   }
   if (z.mount) return room.bosses.stepRider(z, dt, now); // riding the Brood Titan
+  if (t.flyer) return stepFlyer(room, z, dt, now); // Swooper / Sky Sniper: airborne, ignores the ground flow field
   if (t.sniper) return stepSniper(room, z, dt, now);
   if (now >= z.thinkAt) { z.thinkAt = now + 200 + Math.random() * 150; think(room, z, now); }
 
@@ -145,7 +147,8 @@ function step(room, z, dt, now, hash) {
     }
     if (!attack && !face && z.stuck > 0.8 && goal) { // blocked by a piece right in front: hit it (or dig under it)
       if (t.burrow && !z.burrowed && tryBurrow(room, z, goal, now)) return;
-      const s = room.pieceNear(pos, t.reach);
+      // breakers also check overhead — a floor or ramp pinning them down counts as "in the way" too
+      const s = room.pieceNear(pos, t.reach, false, t.breaker ? t.reach + 1.8 * z.s : 1.5);
       if (s && inFront(pos, goal, s.box)) attack = { kind: 's', ref: s };
     }
     if (attack) {

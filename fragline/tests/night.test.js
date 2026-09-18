@@ -1,11 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { waveWeights, composeWave } from '../shared/zombies.js';
+import { waveWeights, composeWave, nightRoll } from '../shared/zombies.js';
 import { ARMOR } from '../shared/holdout.js';
 import { armorStats } from '../shared/items.js';
 import { Director } from '../server/holdout/director.js';
 
 const rng = (s => () => (s = (s * 16807) % 2147483647) / 2147483647)(7);
+
+test('night waves are now a fifth of the time, not a quarter', () => {
+  assert.equal(nightRoll(8, () => 0.19), true, 'just under the new 20% threshold');
+  assert.equal(nightRoll(8, () => 0.2), false, 'boundary is exclusive');
+  assert.equal(nightRoll(8, () => 0.22), false, 'would have rolled a night wave under the old 25% chance, not anymore');
+  assert.equal(nightRoll(3, () => 0), false, 'still never before wave 4');
+  assert.equal(nightRoll(5, () => 0), false, 'still never on a boss wave');
+});
 
 test('the Shade only shows up in wave weights on night waves, and never before wave 6', () => {
   assert.equal(waveWeights(5, 1, true).shade, undefined); // too early even at night

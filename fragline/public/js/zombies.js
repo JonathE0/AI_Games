@@ -33,6 +33,10 @@ const LOOK = {
   broodsniper: { skin: [0x7a9a5a, 0x6f8f52], shirt: [0x3a4a2a], pants: 0x2a3322, eye: 0xff3030, acc: 'rifle', accColor: 0x2b2f35 },
   // rendered separately (its own transparent materials, see spawnShade/poseShade) — these colors are unused
   shade: { skin: [0xcdf5ef], shirt: [0xcdf5ef], pants: 0xcdf5ef, eye: 0xffffff, ghost: true },
+  // flyers: also rendered separately (their own group/materials, see spawnFlyer/poseFlyer) — a leathery diver
+  // and a glowing winged sniper (emissive body + glow sprite so it reads from far away, day or night)
+  swooper: { skin: [0x4a3a52], shirt: [0x2e2438], pants: 0x201a2c, eye: 0xff5030, wing: 0x2e2438 },
+  skysniper: { skin: [0x2a3a4a], shirt: [0x1c2836], pants: 0x141c26, eye: 0x5df2ff, wing: 0x1c2836, glow: 0x5df2ff },
 };
 // zombie classes repaint the base look: plated tanks, blood-red frenzied ones, pale plague medics (+ a green aura)
 const VARIANT = {
@@ -45,6 +49,7 @@ const _root = new THREE.Matrix4(), _m = new THREE.Matrix4(), _t = new THREE.Matr
 const _q = new THREE.Quaternion(), _e = new THREE.Euler(), _v = new THREE.Vector3(), _one = new THREE.Vector3();
 const _c = new THREE.Color(), _w = new THREE.Color(0xffffff);
 const _burn = new THREE.Color(0xff6a1a), _soak = new THREE.Color(0x2f7fff), _chill = new THREE.Color(0xaef4ff), _ice = new THREE.Color(0xd8fbff), _mark = new THREE.Color(0xff2222);
+const _berserk = new THREE.Color(0xff1010); // time's up: red-glowing stragglers (shared/holdout.js berserk)
 const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
 
 // out = root · T(pivot) · Rx(angle) · T(center − pivot) · S(size)
@@ -80,6 +85,7 @@ export class ZombieView {
     }), MAX);
     this.boxGeo = box; // shared, reused (not disposed) for Shades — see spawnShade
     this.shades = new Map(); // Shades render outside the instanced meshes so each can fade independently
+    this.flyers = new Map(); // Swooper / Sky Sniper: same idea — their own group, wings don't fit the instanced rig
     this.offset = undefined;
     this.nextGroan = 0;
   }
@@ -101,7 +107,9 @@ export class ZombieView {
       wobble: 0.6 + Math.random() * 0.5,
     };
     this.list.set(id, zb);
-    if (type === 'shade') this.spawnShade(zb); else this.paint(zb);
+    if (type === 'shade') this.spawnShade(zb);
+    else if (t.flyer) this.spawnFlyer(zb);
+    else this.paint(zb);
   }
 
   // The Shade renders as its own tiny group with two dedicated (unshared) materials, so fading it by
@@ -130,17 +138,55 @@ export class ZombieView {
     this.shades.delete(id);
   }
 
+  // Swooper / Sky Sniper: also their own group — wings and (for the Sky Sniper) a glow sprite don't fit the
+  // shared humanoid instanced rig. Unlit materials so the Sky Sniper reads as "glowing" without real scene lights.
+  spawnFlyer(zb) {
+    const L = zb.look, root = new THREE.Group();
+    const bodyMat = new THREE.MeshBasicMaterial({ color: L.skin[0] });
+    const wingMat = new THREE.MeshBasicMaterial({ color: L.wing ?? L.skin[0], side: THREE.DoubleSide });
+    const eyeMat = new THREE.MeshBasicMaterial({ color: L.eye });
+    const put = (mat, sx, sy, sz, x, y, z) => { const m = new THREE.Mesh(this.boxGeo, mat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); root.add(m); return m; };
+    put(bodyMat, 0.34, 0.3, 0.85, 0, 0, 0);          // body (models face -Z)
+    put(bodyMat, 0.22, 0.22, 0.3, 0, 0.08, -0.55);   // head
+    put(eyeMat, 0.22, 0.06, 0.05, 0, 0.1, -0.72);
+    const wingL = put(wingMat, 0.85, 0.05, 0.4, 0.45, 0.05, 0.05);
+    const wingR = put(wingMat, 0.85, 0.05, 0.4, -0.45, 0.05, 0.05);
+    let glow = null, glowMat = null;
+    if (L.glow) { // a long rifle barrel — reads as a winged sniper — plus a glow sprite, visible at night and at range
+      put(bodyMat, 0.08, 0.08, 0.6, 0.14, -0.02, -0.85);
+      glowMat = new THREE.SpriteMaterial({ color: L.glow, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending });
+      glow = new THREE.Sprite(glowMat);
+      glow.scale.setScalar(1.4);
+      glow.position.set(0, 0.05, 0);
+      root.add(glow);
+    }
+    this.scene.add(root);
+    this.flyers.set(zb.id, { root, bodyMat, wingMat, eyeMat, glow, glowMat, wingL, wingR });
+  }
+
+  removeFlyer(id) {
+    const f = this.flyers.get(id);
+    if (!f) return;
+    this.scene.remove(f.root);
+    f.bodyMat.dispose();
+    f.wingMat.dispose();
+    f.eyeMat.dispose();
+    f.glowMat?.dispose();
+    this.flyers.delete(id);
+  }
+
   paint(zb) {
+    if (zb.t.flyer) return; // rendered separately — see spawnFlyer/poseFlyer
     const L = zb.look, base = zb.slot * SLOTS;
     const cols = [L.pants, L.pants, zb.shirt, zb.shirt, zb.shirt, zb.shirt, L.fist ?? zb.skin, L.fist ?? zb.skin, zb.skin, L.helmet ?? L.sac ?? L.accColor ?? zb.skin, zb.skin];
-    const k = zb.flash, fx = zb.fx || 0;
-    // status tints: burning orange, soaked blue, chilled / frozen icy, marked red (Skybreaker)
-    const tint = zb.st === 4 ? _ice : fx & 4 ? _chill : fx & 1 || L.hot ? _burn : fx & 2 ? _soak : fx & 32 ? _mark : null;
-    // Snipers get a faint glow at night: brighter body and eyes so they're easier to spot from afar
-    const glow = zb.type === 'sniper' || zb.type === 'broodsniper' ? Math.max(0, Math.min(1, ((zb.nightK ?? 0) - 0.3) / 0.7)) : 0;
-    cols.forEach((c, i) => { _c.setHex(c); if (tint) _c.lerp(tint, zb.st === 4 ? 0.65 : 0.4); if (glow) _c.lerp(_w, glow * 0.3); this.body.setColorAt(base + i, _c.lerp(_w, k * 0.7)); });
+    const k = zb.flash, fx = zb.fx || 0, berserk = !!(fx & 64);
+    // status tints: burning orange, soaked blue, chilled / frozen icy, marked red (Skybreaker), berserk (wins out — time's up)
+    const tint = berserk ? _berserk : zb.st === 4 ? _ice : fx & 4 ? _chill : fx & 1 || L.hot ? _burn : fx & 2 ? _soak : fx & 32 ? _mark : null;
+    // Snipers get a faint glow at night (brighter body and eyes, easier to spot from afar); berserk always glows
+    const glow = zb.type === 'sniper' || zb.type === 'broodsniper' ? Math.max(0, Math.min(1, ((zb.nightK ?? 0) - 0.3) / 0.7)) : berserk ? 0.6 : 0;
+    cols.forEach((c, i) => { _c.setHex(c); if (tint) _c.lerp(tint, berserk ? 0.6 : zb.st === 4 ? 0.65 : 0.4); if (glow) _c.lerp(_w, glow * 0.3); this.body.setColorAt(base + i, _c.lerp(_w, k * 0.7)); });
     this.body.instanceColor.needsUpdate = true;
-    for (let i = 0; i < 2; i++) { _c.setHex(L.eye); if (glow) _c.lerp(_w, glow * 0.6); this.eyes.setColorAt(zb.slot * 2 + i, _c); }
+    for (let i = 0; i < 2; i++) { _c.setHex(berserk ? 0xff0000 : L.eye); if (glow) _c.lerp(_w, glow * 0.6); this.eyes.setColorAt(zb.slot * 2 + i, _c); }
     this.eyes.instanceColor.needsUpdate = true;
     this.auras.setColorAt(zb.slot, _c.setHex(zb.cls === 'medic' ? 0x5dff7a : L.aura ?? 0x5dff7a));
     this.auras.instanceColor.needsUpdate = true;
@@ -157,6 +203,7 @@ export class ZombieView {
       const hp = v.getUint8(o + 11) / 255, fx = v.getUint8(o + 12);
       if (hp < zb.hp - 0.001) zb.flash = 1;
       zb.hp = hp;
+      zb.berserk = !!(fx & 64); // time's up: red-glowing, shows on the minimap regardless of night/distance
       if (fx !== zb.fx) { zb.fx = fx; this.paint(zb); }
       zb.snaps.push({ t: ts, x: v.getInt16(o + 2, true) / 100, y: v.getInt16(o + 4, true) / 100, z: v.getInt16(o + 6, true) / 100, yaw: v.getInt16(o + 8, true) / 10000, st: v.getUint8(o + 10), hp });
       if (zb.snaps.length > 30) zb.snaps.shift();
@@ -176,6 +223,7 @@ export class ZombieView {
     const zb = this.list.get(id);
     if (!zb) return;
     this.removeShade(id);
+    this.removeFlyer(id);
     const base = zb.slot * SLOTS;
     for (let i = 0; i < SLOTS; i++) this.body.setMatrixAt(base + i, ZERO);
     for (let i = 0; i < 2; i++) this.eyes.setMatrixAt(zb.slot * 2 + i, ZERO);
@@ -234,7 +282,7 @@ export class ZombieView {
       }
       if (zb.flash > 0) { zb.flash = Math.max(0, zb.flash - dt * 9); if (zb.type !== 'shade') this.paint(zb); }
       if ((zb.type === 'sniper' || zb.type === 'broodsniper') && Math.abs((ctx?.nightK ?? 0) - (zb.nightK ?? 0)) > 0.03) { zb.nightK = ctx?.nightK ?? 0; this.paint(zb); }
-      if (zb.type === 'shade') this.poseShade(zb, dt, ctx); else this.pose(zb, dt);
+      if (zb.type === 'shade') this.poseShade(zb, dt, ctx); else if (zb.t.flyer) this.poseFlyer(zb, dt); else this.pose(zb, dt);
     }
     this.body.instanceMatrix.needsUpdate = this.eyes.instanceMatrix.needsUpdate = this.blobs.instanceMatrix.needsUpdate = this.auras.instanceMatrix.needsUpdate = true;
   }
@@ -260,6 +308,28 @@ export class ZombieView {
     s.root.position.set(zb.pos[0], zb.pos[1], zb.pos[2]);
     s.root.rotation.y = zb.yaw;
     s.root.scale.setScalar(zb.s);
+  }
+
+  // Swooper / Sky Sniper: wings flap (frantic mid-dive/strike, lazy while circling/hovering), nose dips into
+  // a dive, and the Sky Sniper's glow sprite pulses so it reads at night and at range.
+  poseFlyer(zb, dt) {
+    const f = this.flyers.get(zb.id);
+    if (!f) return;
+    zb.phase += dt * (zb.st === 2 ? 15 : zb.st === 1 ? 3 : 6);
+    const flap = Math.sin(zb.phase) * (zb.st === 1 ? 0.12 : 0.5) + 0.3;
+    f.wingL.rotation.z = flap;
+    f.wingR.rotation.z = -flap;
+    const dive = zb.st === 2 ? Math.min(1, (zb.stT ?? 0) / 0.3) : 0; // nose down mid-dive/strike
+    f.root.position.set(zb.pos[0], zb.pos[1], zb.pos[2]);
+    f.root.rotation.set(dive * 0.85, zb.yaw, Math.sin(zb.phase * 0.4) * 0.08, 'YXZ');
+    f.root.scale.setScalar(zb.s);
+    _c.setHex(zb.look.skin[0]).lerp(_w, Math.min(1, zb.flash) * 0.8);
+    f.bodyMat.color.copy(_c);
+    if (f.glow) {
+      const pulse = 0.65 + 0.35 * Math.sin(zb.phase * 0.6);
+      f.glowMat.opacity = 0.5 * pulse;
+      f.glow.scale.setScalar(1.1 + 0.3 * pulse);
+    }
   }
 
   pose(zb, dt) {

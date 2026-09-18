@@ -17,15 +17,19 @@ export function itemLook(it) {
   return { label: itemName(it), color: { throw: '#7fbf5a', heal: '#e05a5a', shield: '#5a9cff', adrenaline: '#ff7a5a', trap: '#b8a58a', deploy: '#c9a24a', attach: '#9aa4ad' }[it.kind] ?? '#9aa4ad', n: it.n };
 }
 
-// a colored item tile — shared by the inventory grid, the hotbar's HUD row and the Banker panel
+// a small lock badge — shared by the inventory grid, the hotbar's HUD row and the Banker panel
+const lockBadge = it => (it?.locked ? '<i class="lock" title="Locked — press L to unlock"></i>' : '');
+
+// a colored item tile — shared by the inventory grid, the hotbar's HUD row and the Banker panel. The icon (if
+// any) sits above the name so long names never overlap it — see .hasIcon in style.css.
 export function slotHTML(ref, it, sel = false, extra = '') {
   const look = itemLook(it);
   const tier = look.tier ? `<i class="tier" style="color:${TIER_COLORS[look.tier]}">${TIERS[look.tier].name}</i>` : '';
   const el = look.el ? `<i class="el" style="background:${look.el}"></i>` : '';
   const n = look.n > 1 ? `<i class="n">${look.n}</i>` : '';
-  const icon = look.icon ? gunGlyph(look.icon, look.color) : '';
+  const icon = look.icon ? `<div class="art">${gunGlyph(look.icon, look.color)}</div>` : '';
   const uid = it ? ` data-uid="${it.uid}"` : '';
-  return `<div class="slot${it ? '' : ' empty'}${sel ? ' sel' : ''}" data-ref="${ref}"${uid} style="--rc:${look.color}">${extra}${tier}${el}${icon}<span>${esc(look.label)}</span>${n}</div>`;
+  return `<div class="slot${it ? '' : ' empty'}${sel ? ' sel' : ''}${icon ? ' hasIcon' : ''}" data-ref="${ref}"${uid} style="--rc:${look.color}">${extra}${tier}${el}${lockBadge(it)}${icon}<span>${esc(look.label)}</span>${n}</div>`;
 }
 
 // ---------- hotbar ----------
@@ -39,8 +43,8 @@ export function hotbarHTML(h) {
     else if (w) sub = 'melee';
     const tier = look.tier ? `<i class="tier" style="color:${TIER_COLORS[look.tier]}">${TIERS[look.tier].name}</i>` : '';
     const el = look.el ? `<i class="el" style="background:${look.el}"></i>` : '';
-    const icon = look.icon ? gunGlyph(look.icon, look.color) : '';
-    slots.push(`<div class="hb${W.slot === s ? ' on' : ''}${it ? '' : ' empty'}" style="--rc:${look.color}"><b>${keys[s - 1]}</b>${tier}${el}${icon}<span>${esc(look.label)}</span><em>${sub}</em></div>`);
+    const icon = look.icon ? `<div class="art">${gunGlyph(look.icon, look.color)}</div>` : '';
+    slots.push(`<div class="hb${W.slot === s ? ' on' : ''}${it ? '' : ' empty'}" style="--rc:${look.color}"><b>${keys[s - 1]}</b>${tier}${el}${lockBadge(it)}${icon}<span>${esc(look.label)}</span><em>${sub}</em></div>`);
   }
   slots.push(`<div class="hb knife${W.slot === 0 ? ' on' : ''}"><b>${keys[HOTBAR]}</b><span>Harvest</span><em>knife</em></div>`);
   const th = h.activeThrow, heals = ['bandage', 'medkit', 'shield_s', 'shield'].reduce((n, id) => n + (h.items[id] || 0), 0);
@@ -53,7 +57,7 @@ const SACK_KEYS = ['7', '8', '9', '0'];
 function sackHTML(h) {
   return `<div class="sack">${Array.from({ length: SACK_SIZE }, (_, i) => {
     const it = h.sack[i], look = itemLook(it);
-    return `<div class="hb sk${it ? '' : ' empty'}" style="--rc:${look.color}"><b>${SACK_KEYS[i]}</b><span>${esc(look.label)}</span><em>${it ? `×${it.n ?? 1}` : ''}</em></div>`;
+    return `<div class="hb sk${it ? '' : ' empty'}" style="--rc:${look.color}"><b>${SACK_KEYS[i]}</b>${lockBadge(it)}<span>${esc(look.label)}</span><em>${it ? `×${it.n ?? 1}` : ''}</em></div>`;
   }).join('')}</div>`;
 }
 
@@ -208,15 +212,16 @@ export function bankHTML(h) {
   const back = Array.from({ length: INV_SIZE - HOTBAR }, (_, k) => slotHTML('i' + (HOTBAR + k), h.inv[HOTBAR + k], h.bankSel === 'i' + (HOTBAR + k))).join('');
   const sack = Array.from({ length: SACK_SIZE }, (_, k) => slotHTML('k' + k, h.sack[k], h.bankSel === 'k' + k)).join('');
   const it = h.bankSel && bankItem(h, h.bankSel);
+  const sellBtn = it && (it.locked ? '<span class="muted">Locked — press L to unlock</span>' : `<button class="mini sellBtn" data-sell="${it.uid}">Sell for $${sellPrice(it)}</button>`);
   const info = it
-    ? `<b style="color:${itemLook(it).color}">${esc(itemName(it))}</b><div class="s">${bankStatLine(it, h)}</div><button class="mini sellBtn" data-sell="${it.uid}">Sell for $${sellPrice(it)}</button>`
-    : '<span class="muted">Click an item to inspect it · shift-click a tile to sell it instantly.</span>';
+    ? `<b style="color:${itemLook(it).color}">${esc(itemName(it))}</b><div class="s">${bankStatLine(it, h)}</div>${sellBtn}`
+    : '<span class="muted">Click an item to inspect it · shift-click a tile to sell it instantly · hover a tile and press L to lock/unlock it.</span>';
   const bb = h.buyback ? `<div class="bankBB"><h3>BUY BACK</h3><div class="grid">${slotHTML('bb', h.buyback.item)}</div><button class="mini" data-buyback="1" ${h.buyback.price > money ? 'disabled' : ''}>${esc(itemName(h.buyback.item))} · $${h.buyback.price}</button></div>` : '';
   return `<div class="bank">
     <div class="bankMain">
-      <h3>SACK</h3><div class="grid sackGrid">${sack}</div>
-      <h3>HOTBAR</h3><div class="grid hot">${hot}</div>
       <h3>BACKPACK</h3><div class="grid">${back}</div>
+      <h3>HOTBAR</h3><div class="grid hot">${hot}</div>
+      <h3>SACK</h3><div class="grid sack">${sack}</div>
     </div>
     <div class="bankSide"><div class="invInfo">${info}</div>${bb}</div>
   </div>`;

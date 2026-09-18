@@ -30,7 +30,11 @@ export class InventoryUI {
     document.body.append(this.ghost);
     // a free mouse (no pointer lock) drives the same handlers as the in-game cursor
     this.onDown = e => { if (this.open && !this.g.input.locked && e.button === 0) { this.down(e.clientX, e.clientY, e.shiftKey); e.preventDefault(); } };
-    this.onMove = e => { if (this.open && !this.g.input.locked) { this.lastMouse = [e.clientX, e.clientY]; this.move(e.clientX, e.clientY); } };
+    // tracked whenever the bag or the Banker is up, so L-to-lock can find a hovered tile even with a free mouse
+    this.onMove = e => {
+      if (!this.g.input.locked && (this.open || this.g.ui === 'bank')) this.lastMouse = [e.clientX, e.clientY];
+      if (this.open && !this.g.input.locked) this.move(e.clientX, e.clientY);
+    };
     this.onUp = e => { if (this.open && !this.g.input.locked && e.button === 0) this.up(e.clientX, e.clientY); };
     addEventListener('mousedown', this.onDown, true);
     addEventListener('mousemove', this.onMove);
@@ -87,7 +91,7 @@ export class InventoryUI {
         <h3>SACK</h3><div class="grid sack">${sack}</div><div class="counters">${counters}</div></div>
       ${chest}</div>
       <div class="invInfo" id="invInfo">${this.infoHTML()}</div>
-      <small class="invHelp">Drag to move · drop outside the window to throw it away · shift-click to quick-move · drop an attachment on a gun to fit it</small>`;
+      <small class="invHelp">Drag to move · drop outside the window to throw it away · shift-click to quick-move · drop an attachment on a gun to fit it · hover a tile and press L to lock/unlock it</small>`;
     this.wire();
     if (this.g.vcur) this.g.setVCursor(...this.g.vcur);
   }
@@ -109,8 +113,8 @@ export class InventoryUI {
       for (const k of ['fire', 'slow', 'blind']) if (a[k]) bits.push(`${pct(a[k][t])} ${k} resist`);
       if (a.speed) bits.push(`+${pct(a.speed[t])} speed`);
       parts.push(`${SLOT_NAME[a.slot]} · ${bits.join(' · ')}`);
-      if (!ref.startsWith('a:')) acts.push(btn('Wear', { act: 'wear' }));
-      else acts.push(btn('Take off', { act: 'unwear' }));
+      if (!ref.startsWith('a:')) acts.push(btn('Wear', { act: 'wear' }, '', it.locked));
+      else acts.push(btn('Take off', { act: 'unwear' }, '', it.locked));
     } else if (it.kind === 'attach') {
       parts.push(ATTACH[it.id].desc + ' · drop it on a gun to fit it');
       acts.push(btn('Fit on the gun in hand', { act: 'fit' }));
@@ -125,7 +129,8 @@ export class InventoryUI {
       if (to === 2) acts.push(btn(`Upgrade to tier II · $${c.money}`, { act: 'tier' }, '', !h.canBuy() || this.g.me.money < c.money));
       else acts.push(`<span class="muted">Tier III: the Blacksmith</span>`);
     }
-    if (!ref.startsWith('s')) acts.push(btn((it.n ?? 1) > 1 ? 'Drop 1' : 'Drop', { act: 'drop1' }), (it.n ?? 1) > 1 ? btn('Drop all', { act: 'drop' }) : '');
+    if (!ref.startsWith('s')) acts.push(btn((it.n ?? 1) > 1 ? 'Drop 1' : 'Drop', { act: 'drop1' }, '', it.locked), (it.n ?? 1) > 1 ? btn('Drop all', { act: 'drop' }, '', it.locked) : '');
+    if (it.locked) parts.push('<span class="muted">Locked — press L to unlock</span>');
     return `<div>${parts.join('<br>')}</div><div class="acts">${acts.join('')}</div>`;
   }
 
@@ -148,16 +153,27 @@ export class InventoryUI {
   }
 
   // ---------- pointer (in-game cursor or real mouse) ----------
-  slotAt(x, y) { return document.elementFromPoint(x, y)?.closest('#bagMenu .slot') ?? null; }
+  // matches tiles in both the inventory and the Banker (they share slotHTML's markup)
+  slotAt(x, y) { return document.elementFromPoint(x, y)?.closest('#bagMenu .slot, #bankMenu .slot') ?? null; }
 
   // Minecraft-style: hovering a slot (any box, including the team chest) and pressing 1-6 swaps it into that hotbar slot.
   hotkeySwap(idx, vcur) {
     if (this.drag) return;
-    const pos = vcur || this.lastMouse;
-    if (!pos) return;
-    const el = this.slotAt(...pos), ref = el?.dataset.ref;
+    const ref = this.refUnder(vcur);
     if (!ref || ref === 'i' + idx) return;
     this.g.net.send({ t: 'move', from: ref, to: 'i' + idx });
+  }
+
+  // The slot ref under the cursor (virtual or real), used by both the hotbar-swap keys and the lock key.
+  refUnder(vcur) {
+    const pos = vcur || this.lastMouse;
+    return pos && (this.slotAt(...pos)?.dataset.ref ?? null);
+  }
+
+  // L while hovering a tile in the inventory or the Banker (including the team chest): toggle its lock.
+  toggleLock(vcur) {
+    const ref = this.refUnder(vcur);
+    if (ref) this.g.net.send({ t: 'lock', ref });
   }
 
   down(x, y, shift = false) {

@@ -337,4 +337,4 @@ export function survivorTier(wave, rng = Math.random) {
 export const SURVIVOR_NAMES = ['Maya', 'Dex', 'Rook', 'Juno', 'Ivy', 'Otto', 'Kaz', 'Nell', 'Bram', 'Suki', 'Vale', 'Ren'];
 
 export const intermissionFor = wave => Math.min(120, 35 + 7 * wave) * 1000; // longer breaks as waves get harder (2 min max)
-export const MONEY_CAP = 30000;
+export const MONEY_CAP = 50000;

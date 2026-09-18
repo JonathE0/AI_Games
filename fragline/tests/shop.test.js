@@ -145,6 +145,19 @@ test('team upgrades: vitality scales max HP off the class, firepower scales dmgM
   assert.ok(room.inventory.stash.money < bankBefore);
 });
 
+test('team upgrades other than vitality still refresh the buyer\'s own money right away', () => {
+  const room = started(new HoldoutRoom('SU', {}));
+  const a = join(room, 'A'), p = a.player;
+  atCore(p);
+  p.money = 100000; // bypasses sendInv, so a.last('inv') is stale until the purchase pushes a fresh one
+  room.handle(p, { t: 'teamup', id: 'firepower' });
+  assert.ok(p.money < 100000, 'charged for the upgrade');
+  assert.equal(a.last('inv').money, p.money, 'the buyer got a fresh inv with the new balance, not a stale one');
+
+  room.handle(p, { t: 'teamup', id: 'engineering' });
+  assert.equal(a.last('inv').money, p.money, 'same for engineering');
+});
+
 test('engineering raises new piece HP and growth rate, and rescales existing builds on level-up', () => {
   const room = started(new HoldoutRoom('SE', {}));
   const a = join(room, 'A'), p = a.player;
@@ -325,4 +338,68 @@ test('gunnery loosens the server\'s fire-rate gate', () => {
   T += 90;
   shoot();
   assert.ok(p.lastShot.pistol > t0, 'Gunnery loosens the gate enough to let the next shot through');
+});
+
+test('item lock: blocks sell, drop, move/swap and team-chest moves, but not upgrades; toggle sends a message', () => {
+  const room = started(new HoldoutRoom('SV', {}));
+  const a = join(room, 'A'), p = a.player;
+  const gun = p.inv[0], uid = gun.uid;
+
+  room.handle(p, { t: 'lock', ref: 'i0' });
+  assert.equal(gun.locked, true, 'locked');
+  assert.match(a.last('msg').text, /locked/i);
+
+  // sell: denied even at the Banker
+  atBanker(p);
+  room.handle(p, { t: 'sell', uid });
+  assert.equal(p.inv[0], gun, 'not sold while locked');
+  assert.match(a.last('deny').text, /Locked/);
+
+  // drop
+  room.handle(p, { t: 'drop', from: 'i0' });
+  assert.equal(p.inv[0], gun, 'not dropped while locked');
+  assert.match(a.last('deny').text, /Locked/);
+
+  // move/swap: locked source and locked destination both block it (covers hotkey-swap and quick-move too — same message)
+  p.inv[1] = makeGun('ar');
+  room.handle(p, { t: 'move', from: 'i1', to: 'i0' });
+  assert.equal(p.inv[0], gun, 'locked destination blocks the swap');
+  assert.equal(p.inv[1].id, 'ar', 'source unchanged too');
+  assert.match(a.last('deny').text, /Locked/);
+  room.handle(p, { t: 'move', from: 'i0', to: 'i2' });
+  assert.equal(p.inv[0], gun, 'locked source blocks the move');
+
+  // the team chest: can't move a locked item in
+  p.st.p = [OUTPOST.stash.x, 0, OUTPOST.stash.z];
+  room.handle(p, { t: 'move', from: 'i0', to: 's0' });
+  assert.equal(p.inv[0], gun, 'locked item stays out of the team chest');
+  assert.match(a.last('deny').text, /Locked/);
+
+  // upgrades still work on a locked item
+  p.money = 100000;
+  atCore(p);
+  room.handle(p, { t: 'rarity', uid });
+  assert.equal(gun.r, 1, 'rarity upgrade still applies while locked');
+  room.handle(p, { t: 'tierup', uid });
+  assert.equal(gun.tier, 2, 'tier upgrade still applies while locked');
+
+  // unlock, then the normal rules resume
+  room.handle(p, { t: 'lock', ref: 'i0' });
+  assert.equal(gun.locked, false);
+  assert.match(a.last('msg').text, /unlocked/i);
+  atBanker(p);
+  room.handle(p, { t: 'sell', uid });
+  assert.equal(p.inv[0], null, 'sells fine once unlocked');
+});
+
+test('item lock: attaching to a gun (an upgrade) still works even if the gun or the attachment is locked', () => {
+  const room = started(new HoldoutRoom('SW', {}));
+  const a = join(room, 'A'), p = a.player;
+  const gun = p.inv[0];
+  p.inv[1] = { uid: 9101, id: 'extmag', kind: 'attach', n: 1 };
+  room.handle(p, { t: 'lock', ref: 'i0' });
+  room.handle(p, { t: 'lock', ref: 'i1' });
+
+  room.handle(p, { t: 'move', from: 'i1', to: 'i0' });
+  assert.equal(gun.att.mag, 'extmag', 'fitted even though both the gun and the attachment were locked');
 });

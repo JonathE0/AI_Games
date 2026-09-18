@@ -322,23 +322,29 @@ button.mini.on { border-color: var(--accent2); color: var(--accent2); }
 .inv .grid { display: grid; grid-template-columns: repeat(6, 64px); gap: 5px; }
 .inv .grid.hot { padding-top: 4px; border-top: 1px dashed var(--line); }
 .inv .slot, .bank .slot { position: relative; width: 64px; height: 64px; border-radius: 6px; background: rgba(255, 255, 255, 0.05); border: 2px solid var(--rc, var(--line));
-  display: flex; align-items: center; justify-content: center; text-align: center; font-size: 11px; font-weight: 700; line-height: 1.1; padding: 3px; overflow: hidden; }
+  display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; font-size: 11px; font-weight: 700; line-height: 1.1; padding: 3px; overflow: hidden; }
 .inv .slot.empty, .bank .slot.empty { border-color: var(--line); opacity: 0.6; }
 .inv .slot.sel, .bank .slot.sel { box-shadow: 0 0 0 2px #fff; }
 .inv .slot.over, .bank .slot.over { background: rgba(255, 255, 255, 0.18); }
-.inv .slot span, .bank .slot span { pointer-events: none; position: relative; z-index: 1; text-shadow: 0 1px 2px #000, 0 0 5px rgba(0, 0, 0, 0.8); }
+.inv .slot span, .bank .slot span { pointer-events: none; flex: 0 0 auto; text-shadow: 0 1px 2px #000, 0 0 5px rgba(0, 0, 0, 0.8); }
 .inv .slot .n, .bank .slot .n { position: absolute; right: 4px; bottom: 2px; font-style: normal; font-size: 13px; }
 .inv .slot .key, .bank .slot .key { position: absolute; left: 4px; top: 2px; font-size: 10px; color: var(--muted); }
 .inv .slot .tier, .bank .slot .tier, #hotbar .hb .tier { position: absolute; right: 4px; top: 2px; font-style: normal; font-size: 11px; font-weight: 800; }
 .inv .slot .el, .bank .slot .el, #hotbar .hb .el { position: absolute; left: 4px; bottom: 4px; width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 6px currentColor; }
+/* lock badge: a tiny CSS padlock (body + shackle arc), top-center so it never collides with the other corner badges */
+.inv .slot .lock, .bank .slot .lock, #hotbar .hb .lock { position: absolute; top: 3px; left: 50%; transform: translateX(-50%); width: 8px; height: 7px; background: #ffd65a; border-radius: 1px; z-index: 2; }
+.inv .slot .lock::before, .bank .slot .lock::before, #hotbar .hb .lock::before { content: ''; position: absolute; left: 1px; top: -5px; width: 6px; height: 6px; box-sizing: border-box; border: 2px solid #ffd65a; border-bottom: none; border-radius: 50% 50% 0 0; }
 #hotbar .hb .tier { top: auto; bottom: 3px; }
 #hotbar .hb .el { left: auto; right: 22px; bottom: 6px; }
-/* gun glyph: a big watermark behind the tile so a weapon reads at a glance, text laid on top */
-.inv .slot .gicon, .bank .slot .gicon { position: absolute; inset: 4px 4px 15px; opacity: 0.85; pointer-events: none; }
+/* the icon sits in its own zone above the name (never behind it) so long names can't overlap the art */
+.inv .slot.hasIcon, .bank .slot.hasIcon { justify-content: flex-end; }
+.inv .slot .art, .bank .slot .art { flex: 1 1 auto; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
+.inv .slot .gicon, .bank .slot .gicon { position: static; width: 60%; height: 60%; opacity: 0.85; pointer-events: none; }
 .inv .slot .gicon svg, .bank .slot .gicon svg { width: 100%; height: 100%; }
-#hotbar .hb .gicon { position: absolute; inset: 13px 8px 15px; opacity: 0.8; pointer-events: none; }
+#hotbar .hb .art { display: flex; align-items: center; justify-content: center; height: 28px; margin: 2px 0 1px; }
+#hotbar .hb .gicon { position: static; width: 26px; height: 26px; opacity: 0.8; pointer-events: none; }
 #hotbar .hb .gicon svg { width: 100%; height: 100%; }
-#hotbar .hb span { position: relative; z-index: 1; text-shadow: 0 1px 2px #000; }
+#hotbar .hb span { text-shadow: 0 1px 2px #000; }
 .invSide { display: flex; flex-direction: column; gap: 10px; align-items: center; }
 .invSide .armor { display: grid; grid-template-columns: repeat(2, 72px); gap: 6px; }
 .invSide .aslot { display: flex; flex-direction: column; align-items: center; gap: 2px; }
@@ -418,7 +424,7 @@ button.mini.on { border-color: var(--accent2); color: var(--accent2); }
 /* ---------- the sack: 4 tiles beside the hotbar, and its row in the inventory grid ---------- */
 #hotbar .sack { display: flex; gap: 5px; order: -1; flex-basis: 100%; justify-content: center; margin: 0 0 5px; }
 #hotbar .hb.sk { width: 84px; border-color: #ff7a5a; }
-.inv .grid.sack { grid-template-columns: repeat(4, 64px); }
+.inv .grid.sack, .bank .grid.sack { grid-template-columns: repeat(4, 64px); }
 
 /* ---------- the Banker ---------- */
 #bankMenu { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(5, 8, 12, 0.55); }
@@ -430,7 +436,6 @@ button.mini.on { border-color: var(--accent2); color: var(--accent2); }
 #bankMenu button.hover, #bankMenu .slot.hover { background: rgba(255, 255, 255, 0.18); border-color: rgba(255, 255, 255, 0.35); }
 .bank { display: grid; grid-template-columns: 1fr 260px; gap: 18px; align-items: start; }
 .bank .grid { display: grid; grid-template-columns: repeat(6, 64px); gap: 5px; margin-bottom: 10px; }
-.bank .grid.sackGrid { grid-template-columns: repeat(4, 64px); }
 .bankSide .invInfo { flex-direction: column; align-items: flex-start; gap: 8px; }
 .bankBB { margin-top: 14px; }
 .bankBB h3 { margin: 0 0 6px; font-size: 12px; letter-spacing: 0.15em; color: var(--muted); }

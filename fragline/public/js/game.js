@@ -427,6 +427,7 @@ export class Game {
     }
     if (this.ui === 'bank') {
       if (act === 'backpack' || act === 'interact') this.holdout.closeBank();
+      else if (act === 'flashlight') this.holdout.invUI.toggleLock(this.vcur);
       else if (code === 'Mouse0') this.vClick();
       else if (code === 'WheelUp' || code === 'WheelDown') this.vScroll(code);
       return;
@@ -440,6 +441,7 @@ export class Game {
     }
     if (this.ui === 'bag') {
       if (act === 'backpack' || act === 'interact') this.holdout.closeBag();
+      else if (act === 'flashlight') this.holdout.invUI.toggleLock(this.vcur);
       else if (code === 'Mouse0' && this.vcur) this.holdout.invUI.down(...this.vcur, this.input.down('ShiftLeft') || this.input.down('ShiftRight'));
       else if (code === 'WheelUp' || code === 'WheelDown') this.vScroll(code);
       else if (HOTBAR_KEYS[act] !== undefined) this.holdout.invUI.hotkeySwap(HOTBAR_KEYS[act], this.vcur);

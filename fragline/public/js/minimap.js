@@ -142,9 +142,10 @@ export class Minimap {
   // which zombies you can place (night hides the far ones)
   zombieVisible(zb, me, dark, torch, yaw, nvK = 0) {
     if (zb.type === 'shade') return (zb.vis ?? 0) > 0.5; // only shown while you can actually see it in the world
+    if (zb.berserk) return true; // time's up: berserk stragglers always show, day or night
     if (!dark) return true;
     const dx = zb.pos[0] - me[0], dz = zb.pos[2] - me[2], d = Math.hypot(dx, dz);
-    if (d < 15 || zb.t.boss || (this.revealed.get(zb.id) ?? 0) > this.g.now) return true;
+    if (d < 15 || zb.t.boss || zb.t.flyer || (this.revealed.get(zb.id) ?? 0) > this.g.now) return true;
     if (nvK > 0.5 && d < 35) return true;
     return torch && d < 40 && (dx * -Math.sin(yaw) + dz * -Math.cos(yaw)) / d > Math.cos(0.45);
   }
@@ -212,7 +213,14 @@ export class Minimap {
         c.beginPath(); c.moveTo(dx, dz - r); c.lineTo(dx + r, dz); c.lineTo(dx, dz + r); c.lineTo(dx - r, dz); c.fill();
         continue;
       }
-      dot(zb.pos[0], zb.pos[2], zb.t.boss ? 5 : 2, zb.t.boss ? '#ff2a2a' : '#e04848');
+      if (zb.t.flyer) { // a little triangle in the air — the Sky Sniper glows cyan, the Swooper a duller violet
+        const dx = X(zb.pos[0]), dz = Z(zb.pos[2]), r = 4 * k;
+        c.fillStyle = zb.type === 'skysniper' ? '#5df2ff' : '#a06bff';
+        c.beginPath(); c.moveTo(dx, dz - r); c.lineTo(dx + r * 0.85, dz + r * 0.7); c.lineTo(dx - r * 0.85, dz + r * 0.7); c.fill();
+        continue;
+      }
+      const berserkPulse = zb.berserk ? 0.6 + 0.4 * Math.sin(g.now * 8) : 1;
+      dot(zb.pos[0], zb.pos[2], (zb.t.boss ? 5 : zb.berserk ? 3 : 2) * berserkPulse, zb.berserk ? '#ff0000' : zb.t.boss ? '#ff2a2a' : '#e04848');
     }
     // survivors, teammates, pings, you
     for (const sv of h.ents.survivors.values()) if (sv.pos[1] > -10) dot(sv.pos[0], sv.pos[2], 2.6, sv.state === 0 ? '#ff9a3c' : '#ffd28a');

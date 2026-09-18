@@ -59,6 +59,22 @@ export function placeItem(slots, item, hotbar = HOTBAR) {
 
 export const countIn = (slots, id) => slots.reduce((n, it) => n + (it?.id === id ? it.n ?? 1 : 0), 0);
 
+// Would `item` fit into `slots` without mutating anything? Mirrors placeItem's stacking + free-slot rules.
+// Shared so the client can tell "wouldn't fit" apart from "fits" before ever sending a pickup/buyback request.
+export function fitsIn(slots, item) {
+  const max = stackMax(item);
+  if (max > 1) {
+    let left = item.n ?? 1;
+    for (const it of slots) {
+      if (it && it.id === item.id && it.kind === item.kind && it.n < max) left -= Math.min(max - it.n, left);
+      if (left <= 0) return true;
+    }
+  }
+  return slots.some(s => !s);
+}
+// Same, but checks the sack first for consumables (mirrors giveItem's placement order).
+export const fits = (inv, sack, item) => (sack && isConsumable(item) && fitsIn(sack, item)) || fitsIn(inv, item);
+
 // Sum of the equipped armor's stats.
 export function armorStats(armor) {
   const s = { def: 0, fire: 0, slow: 0, blind: 0, speed: 0 };

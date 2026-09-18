@@ -33,7 +33,7 @@ export const ACTIONS = [
   ['adrenaline', 'Adrenaline shot (Holdout)', 'KeyJ'],
   ['sack1', 'Use sack item 1 (Holdout)', 'Digit7'], ['sack2', 'Use sack item 2 (Holdout)', 'Digit8'],
   ['sack3', 'Use sack item 3 (Holdout)', 'Digit9'], ['sack4', 'Use sack item 4 (Holdout)', 'Digit0'],
-  ['flashlight', 'Flashlight (Holdout)', 'KeyL'],
+  ['flashlight', 'Flashlight / lock item in inventory (Holdout)', 'KeyL'],
   ['backpack', 'Inventory (Holdout)', 'KeyI'], ['map', 'Full map · click to ping (Holdout)', 'KeyM'],
   // Building: only while build mode is on, so these may share keys with the ones above
   ['bWall', 'Wall', 'KeyQ'], ['bStair', 'Stair / ramp', 'KeyE'], ['bFloor', 'Floor', 'KeyF'],

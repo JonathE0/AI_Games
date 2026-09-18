@@ -8,7 +8,7 @@ import { BMATS, REACH, distToBox } from '/shared/build.js';
 import { WAVES } from '/shared/zombies.js';
 import { WEAPONS } from '/shared/weapons.js';
 import { RARITY, AMMO, ITEMS, POWERUPS, BUFF, THROWABLES, HEALS, SURVIVOR, SURVIVOR_CLASSES, ARMOR, CLASSES, SMITH, CORE_UP_IDS } from '/shared/holdout.js';
-import { HOTBAR, INV_SIZE, SACK_SIZE, ARMOR_SLOTS, countIn, itemName, armorStats } from '/shared/items.js';
+import { HOTBAR, INV_SIZE, SACK_SIZE, ARMOR_SLOTS, countIn, itemName, armorStats, stackMax, fits } from '/shared/items.js';
 import { SKY } from '/shared/skyboss.js';
 import { rayWorld, blocked, bodyHeight, topAt, dirFromAngles } from '/shared/physics.js';
 import { ZombieView } from './zombies.js';
@@ -221,6 +221,7 @@ export class Holdout {
       case 'thump': return this.ents.setThumpers(m.l);
       case 'stomp': { this.ents.stomp(m); const d = Math.hypot(m.p[0] - this.g.player.pos[0], m.p[2] - this.g.player.pos[2]); if (d < 18) this.shake = Math.max(this.shake, 1 - d / 18); return; }
       case 'boss': return this.onBoss(m);
+      case 'berserk': return this.onBerserk(m);
       case 'smith': this.smithOn = !!m.on; if (m.on) this.ents.smithShow(SMITH); return;
       case 'ping': this.minimap.onPing(m); return;
       case 'dmod': { const d = this.ents.defs.get(m.id); if (d) Object.assign(d, { mods: m.mods, ammo: m.ammo }); if (this.g.ui === 'smith') this.renderSmith(); return; }
@@ -334,7 +335,7 @@ export class Holdout {
 
   onPhase(m) {
     const prev = this.phase, hud = this.g.hud;
-    Object.assign(this, { phase: m.phase, wave: m.wave, lanes: m.lanes, next: m.next, core: m.core, left: m.left, end: this.g.now + m.endsIn / 1000, night: !!m.night, nextNight: !!m.nextNight, boss: m.boss, nextBoss: m.nextBoss });
+    Object.assign(this, { phase: m.phase, wave: m.wave, lanes: m.lanes, next: m.next, core: m.core, left: m.left, end: this.g.now + m.endsIn / 1000, night: !!m.night, nextNight: !!m.nextNight, boss: m.boss, nextBoss: m.nextBoss, waveEnd: m.waveEndsIn ? this.g.now + m.waveEndsIn / 1000 : 0 });
     const names = l => l.map(id => LANE_NAME[id]).join(' · ');
     if (m.phase === 'countdown' && prev !== 'countdown') {
       hud.banner('GAME STARTING', 'Everyone to the Core!', '', 3000);
@@ -343,7 +344,7 @@ export class Holdout {
       hud.banner('FORTIFY THE CORE', `Build, harvest and shop — wave 1 comes from ${names(m.next)} in ${Math.round(m.endsIn / 1000)}s`, '', 5000);
       this.g.sound.play('wave_horn', { vol: 0.5, rate: 1.2 });
     } else if (m.phase === 'wave' && prev !== 'wave') {
-      const boss = { sky: 'THE COLOSSUS WAVE', titan: 'BROOD TITAN WAVE', maw: 'THE MAW WAVE' }[m.boss];
+      const boss = { sky: 'THE COLOSSUS WAVE', titan: 'TWO BROOD TITANS WAVE', maw: 'THE MAW WAVE' }[m.boss];
       hud.banner(boss ?? `WAVE ${m.wave}`, `${m.night ? 'NIGHT · ' : ''}Incoming: ${names(m.lanes)}`, 'lose', 3500);
       this.g.sound.play('wave_horn', { vol: 0.9 });
     } else if (m.phase === 'intermission' && prev === 'wave') {
@@ -472,7 +473,8 @@ export class Holdout {
     if (d > 30) return;
     const pos = [zb.pos[0], zb.pos[1] + 1.5 * zb.s, zb.pos[2]];
     if (kind === 'wind') {
-      if ((zb.type === 'brute' || zb.type === 'alpha') && Math.random() < 0.5) this.g.sound.play('brute_roar', { pos, vol: 1.2, ref: 4, rate: zb.type === 'alpha' ? 0.8 : 1 });
+      if (zb.type === 'swooper') this.g.sound.play('brute_roar', { pos, vol: 1, ref: 6, rate: 1.8 }); // screech: locked onto a target, diving in a beat
+      else if ((zb.type === 'brute' || zb.type === 'alpha') && Math.random() < 0.5) this.g.sound.play('brute_roar', { pos, vol: 1.2, ref: 4, rate: zb.type === 'alpha' ? 0.8 : 1 });
       else this.g.sound.play('z_swipe', { pos, vol: 0.9, ref: 2.5, rate: 0.9 + Math.random() * 0.25 });
     }
   }
@@ -643,11 +645,21 @@ export class Holdout {
 
   onBoss(m) {
     const hud = this.g.hud;
-    if (m.ev === 'titanwarn') { hud.banner('THE BROOD TITAN', 'It is coming — its riders can\'t be hurt until they jump off', 'lose', 5000); this.g.sound.play('wave_horn', { vol: 1, rate: 0.6 }); }
-    else if (m.ev === 'titan') { this.g.sound.play('sky_roar', { vol: 1.2, rate: 0.6 }); this.task = { text: 'BROOD TITAN: shoot the glowing egg sac on its back (double damage) · its riders fall when it dies', until: this.g.now + 20 }; }
+    if (m.ev === 'titanwarn') {
+      const two = (m.n ?? 1) > 1;
+      hud.banner(two ? 'TWO BROOD TITANS' : 'THE BROOD TITAN', `${two ? 'They are' : 'It is'} coming — riders can't be hurt until they jump off`, 'lose', 5000);
+      this.g.sound.play('wave_horn', { vol: 1, rate: 0.6 });
+    } else if (m.ev === 'titan') { this.g.sound.play('sky_roar', { vol: 1.2, rate: 0.6 }); this.task = { text: 'BROOD TITAN: shoot the glowing egg sac on its back (double damage) · its riders fall when it dies', until: this.g.now + 20 }; }
     else if (m.ev === 'leap') { const z = this.zombies.list.get(m.id); if (z) this.g.sound.play('brute_roar', { pos: z.pos, vol: 0.8, ref: 5, rate: 1.4 }); }
     else if (m.ev === 'mdrop') this.ents.mdropFx(m.p);
-    else if (m.ev === 'titandie') { hud.banner('BROOD TITAN DOWN', 'It dropped the Brood Launcher!', 'win', 5000); this.g.sound.play('win', { vol: 0.6 }); }
+    else if (m.ev === 'titandie') { hud.banner((m.left ?? 0) > 0 ? 'A BROOD TITAN DOWN' : 'BROOD TITAN DOWN', 'It dropped the Brood Launcher!', 'win', 5000); this.g.sound.play('win', { vol: 0.6 }); }
+  }
+
+  // Wave time limit ran out: every zombie still alive goes berserk; reinforcements trickle in until the last
+  // one dies, then the wave clears like normal (server: director.js).
+  onBerserk(m) {
+    const hud = this.g.hud;
+    if (m.ev === 'start') { hud.banner("TIME'S UP", 'THE HORDE GOES BERSERK! Kill the stragglers to end the wave', 'lose', 6000); this.g.sound.play('wave_horn', { vol: 1, rate: 0.5 }); }
   }
 
   onMaw(m) {
@@ -821,6 +833,15 @@ export class Holdout {
     }
   }
 
+  // Would a ground item pickup actually go somewhere? Mirrors the server's take(): guns/armor/anything else
+  // with a stack size of 1 always succeeds by swapping into your held hotbar slot, so only a full stack of a
+  // stackable consumable/trap/deployable can fail (sack full for consumables, then the backpack full too).
+  pickupFits(pk) {
+    const it = { id: pk.key, kind: pk.ik, n: pk.n, r: pk.r, tier: pk.t, el: pk.el };
+    if (fits(this.inv, this.sack, it)) return true;
+    return stackMax(it) === 1 && !this.heldItem()?.locked; // a full inventory swaps with what you hold — never a locked item
+  }
+
   // What E would do right now (highest priority first).
   interactTarget() {
     const g = this.g, pl = g.player, me = pl.pos;
@@ -835,7 +856,11 @@ export class Holdout {
     for (const d of this.ents.drops.values()) if (d.landed && Math.hypot(d.x - me[0], d.z - me[2]) < 2.7) return { kind: 'opendrop', id: d.id, text: 'Hold E to open the supply drop', hold: 1.0 };
     for (const c of this.ents.chests.values()) if (Math.hypot(c.x - me[0], c.z - me[2]) < 2.4) return { kind: 'chest', id: c.id, text: 'Hold E to open the chest', hold: 0.8 };
     const pk = this.ents.nearestPickup(me, 2.3, p => p.kind === 'it' || p.kind === 'svsupply');
-    if (pk) return { kind: 'pickup', id: pk.id, text: `E: pick up ${pickupName(pk)}${pk.ik === 'gun' && this.inv.every(Boolean) ? ' (swaps with what you hold)' : ''}`, press: true };
+    if (pk) {
+      const name = pickupName(pk);
+      if (pk.kind === 'it' && !this.pickupFits(pk)) return { kind: 'nopickup', text: `Inventory full — can't pick up ${name}` };
+      return { kind: 'pickup', id: pk.id, text: `E: pick up ${name}${pk.ik === 'gun' && this.inv.every(Boolean) ? ' (swaps with what you hold)' : ''}`, press: true };
+    }
     if (this.smithOn && Math.hypot(SMITH.x - me[0], SMITH.z - me[2]) < SMITH.reach) return { kind: 'smith', text: 'E: talk to the Blacksmith (forge, infuse, attachments, turrets)', press: true };
     if (this.nearBanker()) return { kind: 'bank', text: 'E — talk to the Banker', press: true };
     if (this.nearStash()) return { kind: 'stash', text: 'E: open the team chest', press: true };
@@ -852,6 +877,7 @@ export class Holdout {
   pressInteract() {
     const it = this.interactTarget(), g = this.g;
     if (!it) { this.openBag(false); return true; } // nothing to use/pick up/revive/repair here — open the inventory instead
+    if (it.kind === 'nopickup') { this.say(it.text); return true; } // wouldn't fit — flash why, don't open the inventory
     if (!it.press) return false;
     if (it.kind === 'pickup') g.net.send({ t: 'pickup', id: it.id, slot: Math.max(0, g.weapons.slot - 1) });
     else if (it.kind === 'putdown') g.net.send({ t: 'carry' });
@@ -1156,8 +1182,10 @@ export class Holdout {
     const healer = this.coreHealer && this.roster.find(p => p.id === this.coreHealer);
     setText('hoCoreText', `CORE ${c} / ${cm}${barrier ? ' · BARRIER' : ''}${healer ? ` · ${healer.name} healing` : ''}`);
     const left = Math.max(0, this.end - now);
-    setText('hoTimer', ph === 'wave' ? String(this.left) : ph === 'lobby' ? '—' : fmt(left));
-    setText('hoLeft', ph === 'wave' ? 'ZOMBIES LEFT' : ph === 'lobby' ? 'NO TIMER' : ph === 'countdown' ? 'STARTING' : ph === 'prep' ? 'UNTIL WAVE 1' : ph === 'intermission' ? 'UNTIL NEXT WAVE' : 'NEXT MATCH');
+    const waveLeft = this.waveEnd ? Math.max(0, this.waveEnd - now) : 0;
+    const berserkSoon = ph === 'wave' && waveLeft > 0 && waveLeft <= 60; // last minute: show the clock instead of the zombie count
+    setText('hoTimer', berserkSoon ? fmt(waveLeft) : ph === 'wave' ? String(this.left) : ph === 'lobby' ? '—' : fmt(left));
+    setText('hoLeft', berserkSoon ? 'TILL BERSERK' : ph === 'wave' ? 'ZOMBIES LEFT' : ph === 'lobby' ? 'NO TIMER' : ph === 'countdown' ? 'STARTING' : ph === 'prep' ? 'UNTIL WAVE 1' : ph === 'intermission' ? 'UNTIL NEXT WAVE' : 'NEXT MATCH');
     setText('matWood', this.mats.wood);
     setText('matStone', this.mats.stone);
     setText('matMetal', this.mats.metal);
@@ -1185,8 +1213,8 @@ export class Holdout {
       return `<div class="tm sv"><span class="n">${esc(s.name)}${clsTxt} <small>${SURVIVOR.tiers[s.tier]?.name ?? 'survivor'}</small></span><span class="s">${['wounded', 'carried', `${Math.round(s.hp * 100)}% · ${s.ammo} ammo`][s.state]}</span><i style="width:${s.hp * 100}%"></i></div>`;
     }).join(''));
     // boss bar
-    const k = this.ents.sky, mw = this.ents.maw, titan = [...this.zombies.list.values()].find(z => z.type === 'titan' && !z.dead);
-    setHidden('hoBoss', !((k && !k.dead) || mw || titan));
+    const k = this.ents.sky, mw = this.ents.maw, titans = [...this.zombies.list.values()].filter(z => z.type === 'titan' && !z.dead);
+    setHidden('hoBoss', !((k && !k.dead) || mw || titans.length));
     if (k && !k.dead) {
       const alive = k.hp.filter(h => h > 0).length, sum = k.hp.reduce((a, b) => a + Math.max(0, b), 0);
       setText('hoBossName', `THE COLOSSUS · weak points ${alive}/${k.hp.length}`);
@@ -1195,9 +1223,10 @@ export class Holdout {
       const pulsing = [...(this.ents.thumpers?.values() ?? [])].filter(t => t.state === 'pulse').length;
       setText('hoBossName', `THE MAW · ${mw.mode === 'lured' ? 'EXPOSED — SHOOT THE THROAT' : mw.mode === 'devour' ? 'DEVOURING THE CORE' : `thumpers ${pulsing}/${mw.need}`}`);
       setStyle('hoBossFill', 'width', `${((mw.hp / mw.max) * 100).toFixed(1)}%`);
-    } else if (titan) {
-      setText('hoBossName', 'THE BROOD TITAN');
-      setStyle('hoBossFill', 'width', `${(titan.hp * 100).toFixed(1)}%`);
+    } else if (titans.length) { // combined HP bar across both Titans
+      const totalMax = titans.reduce((s, t) => s + t.maxHp, 0), totalHp = titans.reduce((s, t) => s + t.hp * t.maxHp, 0);
+      setText('hoBossName', titans.length > 1 ? `THE BROOD TITANS (${titans.length})` : 'THE BROOD TITAN');
+      setStyle('hoBossFill', 'width', `${((totalHp / totalMax) * 100).toFixed(1)}%`);
     }
     // buffs + task
     const chips = [['damage', 'DAMAGE +30%'], ['rate', 'RAPID FIRE'], ['barrier', 'CORE BARRIER']].filter(([key]) => now < (this.buffs[key] || 0)).map(([key, label]) => `<span>${label} ${Math.ceil(this.buffs[key] - now)}s</span>`);

@@ -7,6 +7,7 @@ import { OUTPOST, OUTPOST_STATIC, OUTPOST_PROPS, PROP_TYPES, OUTPOST_NODES, NODE
 import { armorStats, damageReduction, gunMult } from '../../shared/items.js';
 import { EL } from '../../shared/elements.js';
 import { shieldBlocks, bloaterBurst, addHazard, updateHazards, updateSpecials, updatePlayerEffects, playerEffect } from './behaviors.js';
+import { FLYER_ALT } from './flyers.js';
 import { BMATS, MAT_IDS, KINDS, PIECE_COST, REPAIR_HP_PER_MAT, START_FRAC, REFUND, REACH, pieceBox, pieceBoxes, slotKey, checkPlacement, distToBox, validMask, unsupported } from '../../shared/build.js';
 import { ZTYPES, ZTYPE_IDS, ZCLASSES, ZCLASS_IDS, ZDROPS, CORE_ARMOR, coreHp, bossHp, bossFor, variantChance } from '../../shared/zombies.js';
 import { ITEMS, RARITY, POWERUPS, BUFF, AMMO, MAT_CAP, MONEY_CAP, CLASSES, SURVIVOR_CLASSES, intermissionFor, rollLoot, rollDeploy } from '../../shared/holdout.js';
@@ -126,7 +127,7 @@ export class HoldoutRoom extends BaseRoom {
     this.coreHealer = null;
     this.coreHealAt = 0;
     this.flowDirty = true;
-    Object.assign(this, { flowAt: 0, aiAcc: 0, snapAt: 0, pieceAt: 0, statAt: 0, rosterAt: 0, lastStat: '', coreAlarmAt: 0, golemWaveAlert: -1, seekerAlertAt: 0 });
+    Object.assign(this, { flowAt: 0, aiAcc: 0, snapAt: 0, pieceAt: 0, statAt: 0, rosterAt: 0, lastStat: '', coreAlarmAt: 0, golemWaveAlert: -1, seekerAlertAt: 0, flyerWaveAlert: -1 });
     this.chestSniperTaken = new Set(); // Colossus-wave chest snipers: one per player, reset with the world
     this.events.refreshChests(HOLDOUT.chests);
   }
@@ -403,7 +404,7 @@ export class HoldoutRoom extends BaseRoom {
 
   // Binary horde snapshot: [u8 1, u8 0, u16 count, f64 time] + per zombie
   // [u16 id, i16 x·100, i16 y·100, i16 z·100, i16 yaw·10000, u8 state (4 = frozen), u8 hp/max·255,
-  //  u8 status (1 burning, 2 soaked, 4 chilled, 8 underground, 16 shield up, 32 marked), u8 spare] (14 bytes).
+  //  u8 status (1 burning, 2 soaked, 4 chilled, 8 underground, 16 shield up, 32 marked, 64 berserk), u8 spare] (14 bytes).
   sendSnapshot(now) {
     const buf = Buffer.alloc(12 + this.zombies.size * 14);
     buf.writeUInt8(1, 0);
@@ -418,7 +419,7 @@ export class HoldoutRoom extends BaseRoom {
       buf.writeInt16LE(clamp16(wrap(z.yaw) * 10000), o + 8);
       buf.writeUInt8(now < (z.frozenUntil || 0) ? 4 : z.state, o + 10);
       buf.writeUInt8(Math.max(0, Math.min(255, Math.round((z.hp / z.maxHp) * 255))), o + 11);
-      buf.writeUInt8((z.burnUntil > now ? 1 : 0) | (z.soakUntil > now ? 2 : 0) | (z.chillAt && now - z.chillAt < 3000 && z.chill > 0 ? 4 : 0) | (z.under ? 8 : 0) | (z.t.shield && now >= (z.shieldDown || 0) ? 16 : 0) | (z.markUntil > now ? 32 : 0), o + 12);
+      buf.writeUInt8((z.burnUntil > now ? 1 : 0) | (z.soakUntil > now ? 2 : 0) | (z.chillAt && now - z.chillAt < 3000 && z.chill > 0 ? 4 : 0) | (z.under ? 8 : 0) | (z.t.shield && now >= (z.shieldDown || 0) ? 16 : 0) | (z.markUntil > now ? 32 : 0) | (z.berserk ? 64 : 0), o + 12);
       o += 14;
     }
     for (const p of this.players) if (p.ws && p.ws.readyState === 1) p.ws.send(buf);
@@ -429,7 +430,8 @@ export class HoldoutRoom extends BaseRoom {
     const t = ZTYPES[type], lane = this.map.lanes.find(l => l.id === laneId) ?? this.map.lanes[0];
     const [x0, z0, x1, z1] = lane.zone;
     let x, z, tries = 0;
-    do { x = x0 + this.rng() * (x1 - x0); z = z0 + this.rng() * (z1 - z0); }
+    if (t.flyer) { x = x0 + this.rng() * (x1 - x0); z = z0 + this.rng() * (z1 - z0); } // flies in — no ground clearance needed
+    else do { x = x0 + this.rng() * (x1 - x0); z = z0 + this.rng() * (z1 - z0); }
     while (tries++ < 8 && blocked(x, 0, z, 1.8 * t.scale, this.grid.query(x - 1, z - 1, x + 1, z + 1, tmpBoxes)));
     do this.zid = (this.zid + 1) & 0xffff; while (!this.zid || this.zombies.has(this.zid));
     const cls = variant ?? (!t.boss && !t.noVariant && this.rng() < variantChance(this.wave) ? ZCLASS_IDS[1 + Math.floor(this.rng() * 3)] : '');
@@ -437,7 +439,7 @@ export class HoldoutRoom extends BaseRoom {
     const maxHp = Math.round((t.boss ? bossHp(t, this.director.n) : t.hp * this.director.hpMul) * (C.hp ?? 1));
     const yaw = Math.atan2(x, z); // face the Core
     const zb = {
-      id: this.zid, type, t, ti: ZTYPE_IDS.indexOf(type), pos: [x, 0, z], vel: [0, 0, 0], yaw, g: true,
+      id: this.zid, type, t, ti: ZTYPE_IDS.indexOf(type), pos: [x, t.flyer ? FLYER_ALT : 0, z], vel: [0, 0, 0], yaw, g: !t.flyer,
       hp: maxHp, maxHp, armor: (t.armor || 0) + (cls === 'tank' ? 60 : 0), helmet: !!t.helmet || cls === 'tank', s: t.scale * (C.scale ?? 1),
       cls, ci: ZCLASS_IDS.indexOf(cls), spd: C.speed ?? 1, dmgMul: C.dmg ?? 1,
       state: 0, stateEnd: 0, nextAtk: 0, target: null, aggro: null, thinkAt: 0, aggroBlock: 0, stuck: 0,
@@ -452,6 +454,9 @@ export class HoldoutRoom extends BaseRoom {
     } else if (type === 'seeker') {
       const now = Date.now();
       if (now - this.seekerAlertAt > 20000) { this.seekerAlertAt = now; this.broadcast({ t: 'task', text: "CORE SEEKER — it's going for the Core!" }); }
+    } else if ((type === 'swooper' || type === 'skysniper') && this.flyerWaveAlert !== this.wave) {
+      this.flyerWaveAlert = this.wave;
+      this.broadcast({ t: 'task', text: type === 'swooper' ? 'SWOOPER — incoming from above!' : 'SKY SNIPER — a laser from the sky means take cover!' });
     }
     return zb;
   }
@@ -487,12 +492,13 @@ export class HoldoutRoom extends BaseRoom {
   }
 
   // Nearest built piece standing on the ground within r of a zombie (walls, ramps, supports, doors).
-  // buildsOnly: skip map props.
-  pieceNear(pos, r, buildsOnly = false) {
+  // buildsOnly: skip map props. maxUp: how far overhead a box may sit and still count (breakers stuck under
+  // a floor/ramp need a taller window than the default hip-height cutoff).
+  pieceNear(pos, r, buildsOnly = false, maxUp = 1.5) {
     const body = [pos[0], pos[1] + 0.9, pos[2]];
     let best = null, bd = r;
     for (const b of this.grid.query(pos[0] - r - 1, pos[2] - r - 1, pos[0] + r + 1, pos[2] + r + 1, [])) {
-      if (b.sid === undefined || b.min[1] > pos[1] + 1.5) continue;
+      if (b.sid === undefined || b.min[1] > pos[1] + maxUp) continue;
       const d = distToBox(body, b);
       const s = this.pieces.get(b.sid);
       if (d <= bd && s && (!buildsOnly || s.kind !== 'prop')) { bd = d; best = s; }
@@ -627,21 +633,23 @@ export class HoldoutRoom extends BaseRoom {
     this.zombies.delete(z.id);
     const reward = z.t.reward, player = killer?.stats ? killer : null;
     if (player) {
-      player.money = Math.min(MONEY_CAP, player.money + reward);
       player.stats.kills++;
-      if (player.cls === 'assault') player.assaultBuffUntil = Date.now() + CLASSES.assault.killRateMs; // +fire rate briefly after a kill
-      if (this.rng() < 0.25) player.mats.metal += 3; // scrap
+      if (!z.noReward) { // berserk reinforcements (director.js) are worth nothing — time's up, no farming them
+        player.money = Math.min(MONEY_CAP, player.money + reward);
+        if (player.cls === 'assault') player.assaultBuffUntil = Date.now() + CLASSES.assault.killRateMs; // +fire rate briefly after a kill
+        if (this.rng() < 0.25) player.mats.metal += 3; // scrap
+      }
       this.sendInv(player);
       // now and then a zombie drops a few rounds for the gun that killed it (ammo is otherwise bought)
       const type = WEAPONS[wId]?.ammo;
-      if (type && type !== 'rockets' && this.rng() < 0.2) this.inventory.spawn({ kind: 'ammo', type, n: Math.max(3, Math.round((AMMO[type].pack / 4) * 1.5)) }, [z.pos[0], z.pos[1], z.pos[2]]);
+      if (!z.noReward && type && type !== 'rockets' && this.rng() < 0.2) this.inventory.spawn({ kind: 'ammo', type, n: Math.max(3, Math.round((AMMO[type].pack / 4) * 1.5)) }, [z.pos[0], z.pos[1], z.pos[2]]);
     }
-    for (const [pid, d] of z.dmgBy) {
+    if (!z.noReward) for (const [pid, d] of z.dmgBy) {
       const q = pid !== player?.id && d >= z.maxHp * 0.25 && this.players.find(x => x.id === pid);
       if (q) { q.money = Math.min(MONEY_CAP, q.money + Math.round(reward / 2)); this.sendInv(q); }
     }
-    this.typeDrop(z);
-    if (this.rng() < 0.03) this.inventory.spawn({ kind: 'item', id: 'adrenaline', n: 1 }, [z.pos[0], z.pos[1] + 0.2, z.pos[2]]);
+    if (!z.noReward) this.typeDrop(z);
+    if (!z.noReward && this.rng() < 0.03) this.inventory.spawn({ kind: 'item', id: 'adrenaline', n: 1 }, [z.pos[0], z.pos[1] + 0.2, z.pos[2]]);
     if (z.t.burst) bloaterBurst(this, z);
     if (z.t.boss) { // bosses drop guns, ammo, materials and survivor supplies
       this.inventory.scatter(rollLoot('boss'), [z.pos[0], z.pos[1], z.pos[2]], 2.2, true);
@@ -1234,6 +1242,7 @@ export class HoldoutRoom extends BaseRoom {
       case 'dropgun': return this.inventory.onDropGun(p, m);
       case 'move': return this.inventory.onMove(p, m);
       case 'drop': return this.inventory.onDrop(p, m);
+      case 'lock': return this.inventory.onLock(p, m);
       case 'tierup': return this.inventory.onTierUp(p, m);
       case 'rarity': return this.inventory.onRarity(p, m);
       case 'sell': return this.inventory.onSell(p, m);
@@ -1273,6 +1282,8 @@ export class HoldoutRoom extends BaseRoom {
       boss: this.phase === 'wave' ? bossFor(this.wave) : null, nextBoss: this.phase !== 'wave' ? bossFor(this.wave + 1) : null,
       next: this.phase === 'wave' ? [] : this.director.planned?.lanes ?? [], core: [Math.round(this.core.hp), this.core.max],
       left: this.director.remaining + this.zombies.size, diff: this.diffId,
+      // time left before the horde goes berserk (0 once it already has, or outside the wave phase)
+      waveEndsIn: this.phase === 'wave' && !this.director.berserk ? Math.max(0, this.director.deadline - Date.now()) : 0,
     };
   }
 

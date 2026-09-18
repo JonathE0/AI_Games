@@ -7,6 +7,8 @@ import { BoxGrid } from '../shared/boxgrid.js';
 import { WEAPONS } from '../shared/weapons.js';
 import { ITEMS, SURVIVOR, SURVIVOR_CLASSES, SMITH, DEFENSES, TURRET_TYPES, DEPLOY_WEIGHT, DEPLOY_IDS, rollDeploy, rollLoot, rescueWave, elementPrice } from '../shared/holdout.js';
 import { OUTPOST_PROPS, OUTPOST_SHELTERS, PROP_TYPES, NODE_TYPES } from '../shared/outpost.js';
+import { ZTYPES } from '../shared/zombies.js';
+import { MAW } from '../server/holdout/bosses.js';
 
 let T = 9_000_000;
 const realNow = Date.now;
@@ -367,14 +369,14 @@ test('specialists: snipers camp and hit survivors harder, hexers blind, bloaters
   for (const z of [...room.zombies.values()]) room.removeZombie(z);
   const keep = room.spawnZombie('shambler', 'S', ''); keep.pos = [44, 0, 44]; keep.frozenUntil = T + 1e9; keep.hp = keep.maxHp = 1e6; // keeps the wave going
   // sniper vs a survivor standing in the open
-  const sv = room.survivors.spawnWounded({ x: 0, z: -20 }, 0); sv.state = 'active'; sv.pos = [0, 0, -20]; sv.post = [0, -20]; sv.postAt = T + 1e9;
+  const sv = room.survivors.spawnWounded({ x: 0, z: -10 }, 0); sv.state = 'active'; sv.pos = [0, 0, -10]; sv.post = [0, -10]; sv.postAt = T + 1e9; // inside the Core leash, so it holds still on the sniper's line
   p.st.p = [40, 0, 40];
   const sn = room.spawnZombie('sniper', 'N', ''); sn.pos = [0, 0, -44]; sn.hist = [];
   const spawnAt = [...sn.pos], hp0 = sv.hp;
   advance(room, 7000);
   assert.ok(Math.hypot(sn.pos[0] - spawnAt[0], sn.pos[2] - spawnAt[2]) < 3, 'the sniper stays at its gate');
   assert.ok(a.all('zaim').length >= 1, 'it telegraphs its shots');
-  assert.ok(hp0 - sv.hp >= 40, `survivor took ${hp0 - sv.hp}`); // npcDmg 45 * ~1.35 wave mul, one shot in the 2.2s-windup window
+  assert.ok(hp0 - sv.hp >= 40, `survivor took ${hp0 - sv.hp}`); // npcDmg 58 * wave mul, one shot in the 2.2 s windup window
   room.removeZombie(sn);
   room.survivors.perish(sv);
   p.st.p = [0, 0, -10];
@@ -414,24 +416,26 @@ test('burrowers dig under a build once and surface a tile past it; shields block
   assert.ok(back > front * 3, `front ${front} vs back ${back}`);
 });
 
-test('Brood Titan: two riders leap immediately, drops minions every 8s, permanent Sniper Riders stay mounted until it dies', () => {
+test('Wave 10: two Brood Titans arrive together, each at 75% HP, riders leap immediately, drop minions every 8s, permanent Sniper Riders stay mounted until their Titan dies', () => {
   const room = started(new HoldoutRoom('B', {}));
   const a = join(room, 'A'), p = a.player;
   p.st.p = [40, 0, 40];
   room.startWave(10);
-  assert.ok(a.all('task').some(m => /BROOD TITAN/.test(m.text)), 'announced at the start of wave 10');
+  assert.ok(a.all('task').some(m => /BROOD TITANS?/.test(m.text)), 'announced at the start of wave 10');
   room.director.queue = [];
   for (const z of [...room.zombies.values()]) room.removeZombie(z);
   advance(room, 200);
-  assert.equal(room.phase, 'wave', 'the wave waits for the Titan');
+  assert.equal(room.phase, 'wave', 'the wave waits for the Titans');
   advance(room, 5200);
-  const titan = [...room.zombies.values()].find(z => z.type === 'titan');
-  assert.ok(titan, 'the Titan arrived');
+  const titans = [...room.zombies.values()].filter(z => z.type === 'titan');
+  assert.equal(titans.length, 2, 'both Titans arrived together');
+  const solo = Math.round(ZTYPES.titan.hp * (1 + 0.6 * (room.director.n - 1)));
+  for (const t of titans) assert.equal(t.maxHp, Math.round(solo * 0.75), 'each Titan runs at 75% of the old solo HP');
   const riders = [...room.zombies.values()].filter(z => z.type === 'rider');
   const snipers = [...room.zombies.values()].filter(z => z.type === 'broodsniper');
-  assert.ok(riders.length >= 5, 'a full complement of normal riders');
-  assert.equal(snipers.length, 2, 'two permanent Sniper Riders');
-  assert.equal(riders.filter(r => !r.mount).length, 2, 'two riders leap down and start fighting the moment it arrives');
+  assert.ok(riders.length >= 10, 'a full complement of normal riders on each Titan');
+  assert.equal(snipers.length, 4, 'two permanent Sniper Riders per Titan');
+  assert.equal(riders.filter(r => !r.mount).length, 4, 'two riders per Titan leap down and start fighting the moment it arrives');
   assert.ok(snipers.every(r => r.mount), 'the Sniper Riders stay mounted');
   const mounted = riders.find(r => r.mount);
   assert.equal(room.damageZombie(mounted, 100, p, 'ar'), 0, 'mounted riders cannot be hurt');
@@ -439,15 +443,18 @@ test('Brood Titan: two riders leap immediately, drops minions every 8s, permanen
   const minionsBefore = [...room.zombies.values()].filter(z => z.type === 'runner' || z.type === 'stalker').length;
   advance(room, 8500);
   const minionsAfter = [...room.zombies.values()].filter(z => z.type === 'runner' || z.type === 'stalker').length;
-  assert.ok(minionsAfter >= minionsBefore + 2, 'drops fresh minions off its back every ~8s');
+  assert.ok(minionsAfter >= minionsBefore + 4, 'both Titans drop fresh minions off their backs every ~8s');
   assert.ok(snipers.every(r => r.mount && !r.dead), 'still mounted after the minion drop');
   const mountedBefore = riders.filter(r => r.mount).length;
-  advance(room, 4500); // ~13s since it arrived: past the new 12s (was 18s) regular dismount cycle
+  advance(room, 4500); // ~13s since they arrived: past the new 12s (was 18s) regular dismount cycle
   assert.ok(riders.filter(r => r.mount).length < mountedBefore, 'the regular cycle leaps another rider down after ~12s');
   assert.ok(snipers.every(r => r.mount), 'permanent Sniper Riders never dismount on their own');
-  room.killZombie(titan, p, 'rocket');
+  room.killZombie(titans[0], p, 'rocket');
   advance(room, 100);
-  assert.ok(riders.every(r => r.dead || !r.mount), 'the rest fall off when it dies');
+  assert.equal(room.phase, 'wave', 'one Titan down: the wave waits for the other plus every rider');
+  room.killZombie(titans[1], p, 'rocket');
+  advance(room, 100);
+  assert.ok(riders.every(r => r.dead || !r.mount), 'the rest fall off once their Titan dies');
   assert.ok(snipers.every(r => !r.mount), 'the Sniper Riders fall off too, and are now killable');
   assert.equal(room.bosses.immune(snipers[0]), false, 'no longer immune once dismounted');
   assert.equal(room.bosses.smith, false, 'the Titan no longer gates the Blacksmith (it unlocks at wave 7 instead)');
@@ -465,6 +472,8 @@ test('The Maw: thumpers lure it up, its throat takes triple damage, it tries to 
   for (const z of [...room.zombies.values()]) room.removeZombie(z);
   const B = room.bosses, m = B.maw;
   assert.ok(m && m.need === 1);
+  assert.equal(MAW.hp, 48000, 'the Maw has 4x its old base HP (12000 -> 48000)');
+  assert.equal(m.max, Math.round(MAW.hp * (1 + 0.6 * (room.director.n - 1))), 'solo scaling still applies on top of the new base');
   advance(room, 5000);
   assert.equal(m.mode === 'hunt' || m.mode === 'warn' || m.mode === 'erupt', true);
   // arm a thumper (hold E 5 s)
