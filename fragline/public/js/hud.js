@@ -1,5 +1,6 @@
-// DOM HUD: vitals, ammo, clock, kill feed, banners, buy menu, scoreboard, settings + crosshair.
-import { WEAPONS, GEAR, BUY_MENU } from '/shared/weapons.js';
+// DOM HUD: vitals, ammo, kill feed, banners, settings + crosshair (Holdout draws its own wave clock, shop,
+// scoreboard and end-of-match report directly).
+import { WEAPONS } from '/shared/weapons.js';
 
 const RARITY = { covert: '#eb4b4b', contraband: '#e4ae39', restricted: '#a77bff', knife: '#ffd700' };
 const LOOT_COLORS = ['#b7bec7', '#5fd35a', '#4aa8ff', '#c07bff', '#ffb43c']; // Holdout rarities (shared/holdout.js)
@@ -29,11 +30,14 @@ export const ACTIONS = [
   ['demolish', 'Demolish piece (Holdout)', 'KeyX'], ['ready', 'Ready up (Holdout)', 'KeyY'],
   ['slot4', 'Hotbar slot 4 (Holdout)', 'Digit4'], ['slot5', 'Hotbar slot 5 (Holdout)', 'Digit5'], ['slot6', 'Hotbar slot 6 (Holdout)', 'Digit6'],
   ['throw', 'Throw grenade (Holdout)', 'KeyT'], ['nextThrow', 'Next throwable (Holdout)', 'KeyN'], ['heal', 'Heal / shield (Holdout)', 'KeyH'],
+  ['adrenaline', 'Adrenaline shot (Holdout)', 'KeyJ'],
+  ['sack1', 'Use sack item 1 (Holdout)', 'Digit7'], ['sack2', 'Use sack item 2 (Holdout)', 'Digit8'],
+  ['sack3', 'Use sack item 3 (Holdout)', 'Digit9'], ['sack4', 'Use sack item 4 (Holdout)', 'Digit0'],
   ['flashlight', 'Flashlight (Holdout)', 'KeyL'],
-  ['backpack', 'Inventory (Holdout)', 'KeyI'], ['dropgun', 'Drop item in hand (Holdout)', 'KeyZ'], ['map', 'Full map · click to ping (Holdout)', 'KeyM'],
+  ['backpack', 'Inventory (Holdout)', 'KeyI'], ['map', 'Full map · click to ping (Holdout)', 'KeyM'],
   // Building: only while build mode is on, so these may share keys with the ones above
   ['bWall', 'Wall', 'KeyQ'], ['bStair', 'Stair / ramp', 'KeyE'], ['bFloor', 'Floor', 'KeyF'],
-  ['bTrap', 'Trap (spikes, darts, flames)', 'KeyT'], ['bDeploy', 'Turret / campfire', 'KeyZ'], ['bRotate', 'Rotate stair', 'KeyR'],
+  ['bTrap', 'Trap (spikes, darts, flames)', 'KeyT'], ['bDeploy', 'Turret / Rally Fire', 'KeyZ'], ['bRotate', 'Rotate stair', 'KeyR'],
 ];
 export const BUILD_ACTIONS = new Set(['bWall', 'bStair', 'bFloor', 'bTrap', 'bDeploy', 'bRotate']);
 const BIND_SECTIONS = [
@@ -235,19 +239,6 @@ export class Hud {
       .map(s => `<span class="${s === activeSlot ? 'on' : ''}">${s} ${esc(WEAPONS[slots[s].w].name)}</span>`).join(''));
   }
 
-  clock(text, low, label) {
-    setText('timer', text);
-    setClass('timer', 'low', low);
-    setText('roundNo', label);
-  }
-
-  score(me, them, meName, themName) {
-    setText('scoreMe', me);
-    setText('scoreThem', them);
-    setText('nameMe', meName);
-    setText('nameThem', themName);
-  }
-
   kill(killer, victim, weapon, hs, wb, mine) {
     const d = document.createElement('div');
     if (mine) d.className = 'mine';
@@ -268,17 +259,6 @@ export class Hud {
 
   hint(text) { setText('hint', text); }
 
-  roundEnd(data) {
-    const el = $('roundEnd');
-    if (!data) { el.hidden = true; return; }
-    el.hidden = false;
-    el.className = data.win ? 'win' : 'lose';
-    $('reTitle').textContent = data.title;
-    $('reReason').textContent = data.reason;
-    $('reGiven').textContent = data.given;
-    $('reTaken').textContent = data.taken;
-  }
-
   hitDir(angleDeg) {
     const d = document.createElement('div');
     d.className = 'hd';
@@ -292,37 +272,6 @@ export class Hud {
   }
 
   scope(on) { setHidden('scope', !on); }
-
-  renderBuy(st) {
-    $('buyMoney').textContent = '$' + st.money;
-    $('buyTimer').textContent = st.canBuy ? st.timeText : 'Buy time over';
-    $('buyGrid').innerHTML = [...BUY_MENU, ...(st.extra || [])].map(([cat, ids]) => `<div class="buyCol"><h3>${cat.toUpperCase()}</h3>${ids.map(id => {
-      const w = WEAPONS[id], g = GEAR[id];
-      let price = w ? w.price : g.price, stats, owned;
-      if (w) {
-        stats = w.pellets > 1 ? `${w.dmg}×${w.pellets} dmg · ${w.rpm} rpm · ${w.mag}/${w.reserve}` : `${w.dmg} dmg · ${w.rpm} rpm · ${w.mag}/${w.reserve}`;
-        owned = st.owned.has(id);
-      } else if (id === 'ammo') { stats = 'Refill every magazine + reserve'; owned = false; }
-      else if (id === 'kevlar') { stats = '100 armor, body only'; owned = st.armor >= 100; }
-      else {
-        stats = 'Armor + headshot protection';
-        owned = st.armor >= 100 && st.helmet;
-        if (st.armor >= 100 && !st.helmet) price = g.upgrade;
-      }
-      const poor = !st.free && price > st.money;
-      return `<button class="buyItem ${owned ? 'owned' : ''} ${poor ? 'poor' : ''}" data-id="${id}" ${!st.canBuy || owned || poor ? 'disabled' : ''}>
-        <div class="n"><span>${esc(w ? w.name : g.name)}</span><em>$${price}</em></div>${w?.skin ? `<div class="skin" style="color:${RARITY[w.rarity]}">${esc(w.skin)}</div>` : ''}<div class="s">${owned ? 'OWNED' : stats}</div></button>`;
-    }).join('')}</div>`).join('');
-    for (const b of $('buyGrid').querySelectorAll('button')) b.onclick = () => st.onBuy(b.dataset.id);
-  }
-
-  scoreboard(show, roster, myId, meta) {
-    setHidden('scoreboard', !show);
-    if (!show) return;
-    setHTML('sbBody', [...roster].sort((a, b) => (b.id === myId) - (a.id === myId)).map(p =>
-      `<tr class="${p.id === myId ? 'me' : ''} ${p.alive ? '' : 'dead'}"><td>${esc(p.name)} <small>${p.side}</small></td><td>${p.score}</td><td>${p.kills}</td><td>${p.deaths}</td><td>${p.dmg}</td><td>${p.bot ? 'BOT' : p.ping}</td></tr>`).join(''));
-    $('sbMeta').textContent = meta;
-  }
 
   chat(name, text) {
     const d = document.createElement('div');

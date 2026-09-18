@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Minimal 1v1 browser FPS with CS/Valorant-style mechanics",
+  "description": "Zombie Holdout: a co-op browser survival shooter — build, harvest and defend the Core against endless zombie waves",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

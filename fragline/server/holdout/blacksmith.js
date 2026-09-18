@@ -1,12 +1,13 @@
-// The Blacksmith: an NPC who sets up an anvil beside the Core once the first Brood Titan falls (wave 10).
+// The Blacksmith: an NPC who sets up an anvil beside the Core once wave 7 is cleared.
 // Talk to him (E) to forge tier III guns and armor, infuse guns with an element, fit attachments, and
 // upgrade turrets (damage, range, fire rate, ammo, incendiary / frost rounds, armor plating).
 import { ATTACH } from '../../shared/items.js';
-import { SMITH } from '../../shared/holdout.js';
+import { SMITH, TURRET_TYPES } from '../../shared/holdout.js';
 import { ELEMENTS } from '../../shared/elements.js';
 import { ARMOR_SLOTS } from '../../shared/items.js';
 import { giveItem } from './inventory.js';
 import { nextUid } from '../baseRoom.js';
+import { FORCED_EL } from './defenses.js';
 
 export { SMITH };
 
@@ -30,15 +31,18 @@ export class Blacksmith {
   // m: { t: 'smith', op: 'forge' | 'infuse' | 'fit' | 'turret', uid?, el?, id?, def?, up? }
   handle(p, m) {
     const room = this.room, deny = text => room.send(p, { t: 'deny', text });
-    if (!room.bosses.smith) return deny('The Blacksmith arrives after the first Brood Titan falls');
+    if (!room.bosses.smith) return deny('The Blacksmith arrives once wave 7 is cleared');
     if (!this.near(p)) return deny('Talk to the Blacksmith at his anvil');
     if (m.op === 'forge') return room.inventory.onTierUp(p, { uid: m.uid }, true);
     if (m.op === 'infuse') {
       const it = this.item(p, m.uid);
       if (!it || it.kind !== 'gun' || !ELEMENTS[m.el]) return;
-      if (it.el === m.el) return deny('Already infused with that');
-      if (!this.pay(p, SMITH.infuse.money, SMITH.infuse.metal)) return;
-      it.el = m.el;
+      const els = it.els ?? (it.el ? [it.el] : []);
+      if (els.includes(m.el)) return deny('Already infused with that');
+      if (!this.pay(p, SMITH.infuse.money, SMITH.infuse.metal * (1 + els.length))) return; // adds on: metal scales with what's already on it
+      const next = [...els, m.el];
+      it.el = next[0];
+      it.els = next;
       room.send(p, { t: 'msg', text: `${ELEMENTS[m.el].name} infused` });
     } else if (m.op === 'fit') {
       const it = this.item(p, m.uid), a = ATTACH[m.id];
@@ -51,13 +55,16 @@ export class Blacksmith {
       room.send(p, { t: 'msg', text: `${a.name} fitted` });
     } else if (m.op === 'turret') {
       const d = room.defenses.list.get(m.def | 0), u = SMITH.turret[m.up];
-      if (!d || (d.type !== 'turret' && d.type !== 'rturret') || !u) return;
+      if (!d || !TURRET_TYPES.includes(d.type) || !u) return;
+      if ((m.up === 'inc' || m.up === 'frost') && FORCED_EL[d.type]) return deny('This turret already has its own element');
       d.mods ??= {};
-      if (u.max && (d.mods[m.up] || 0) >= u.max) return deny('Fully upgraded');
-      if (!this.pay(p, u.price)) return;
-      if (m.up === 'ammo') d.ammo = room.defenses.maxAmmo(d);
-      else {
-        d.mods[m.up] = (d.mods[m.up] || 0) + 1;
+      if (m.up === 'ammo') {
+        if (!this.pay(p, u.price)) return;
+        d.ammo = room.defenses.maxAmmo(d);
+      } else {
+        const level = d.mods[m.up] || 0;
+        if (!this.pay(p, Math.round(u.price * 1.5 ** level))) return; // stacks without limit, pricier each level
+        d.mods[m.up] = level + 1;
         if (m.up === 'plate') { d.hp += 300; d.maxHp = (d.maxHp || d.hp - 300) + 300; }
       }
       room.defenses.broadcastMods(d);

@@ -1,5 +1,5 @@
-// Shared room plumbing for every mode: messaging, weapon items with unique ids, and relaying the
-// movement, sounds and chat that clients report.
+// Shared room plumbing: messaging, weapon items with unique ids, and relaying the movement, sounds and
+// chat that clients report.
 import { WEAPONS } from '../shared/weapons.js';
 
 let uid = 1;
@@ -8,7 +8,7 @@ export const nextUid = () => uid++;
 export class BaseRoom {
   newItem(w) { return { w, uid: uid++ }; }
 
-  // Messages every mode handles the same way. Returns true when the message was consumed.
+  // Messages every room handles the same way. Returns true when the message was consumed.
   handleCommon(p, m) {
     switch (m.t) {
       case 'st': this.onState(p, m); return true;

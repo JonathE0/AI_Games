@@ -1,7 +1,7 @@
 // "Outpost" — the Zombie Holdout map: a 96 m field with the Core in the middle, four lanes (N/E/S/W)
 // where the horde enters, a ring of ruined walls with gates ~26 m out, a shack in every corner and
 // harvestable trees, rocks and wrecked cars. One quarter (north lane + NE corner) is rotated 4x.
-// Entry: [minX, minY, minZ, maxX, maxY, maxZ, material] (materials as in shared/map.js).
+// Entry: [minX, minY, minZ, maxX, maxY, maxZ, material] (bullet penetration per material in shared/physics.js MAT_RESIST).
 
 const CENTER = [
   [-48, -1, -48, 48, 0, 48, 'f'],
@@ -78,9 +78,12 @@ const toBox = ([a, b, c, d, e, f, mat]) => ({ min: [a, b, c], max: [d, e, f], ma
 
 // the team chest (shared stash) beside the Core
 const STASH_BOX = { min: [2.3, 0, 2.45], max: [3.3, 0.9, 3.15], mat: 'm' };
+// the Banker's counter (selling), also inside the ring — center matches OUTPOST.banker below
+const BANKER_BOX = { min: [4.5, 0, -5.0], max: [5.9, 0.9, -4.2], mat: 'm' };
 
-// Unbreakable: the ground, the border, the Core and the team chest. Everything else on the map is a prop.
-export const OUTPOST_STATIC = [...CENTER.map(toBox), CORE_BASE, STASH_BOX];
+// Unbreakable: the ground, the border, the Core, the team chest and the Banker's counter.
+export const OUTPOST_STATIC = [...CENTER.map(toBox), CORE_BASE, STASH_BOX, BANKER_BOX];
+export { BANKER_BOX };
 
 // Breakable map props (walls, cover, crates, shacks, houses, ruins): HP and what harvesting them yields.
 export const PROP_TYPES = {
@@ -122,7 +125,8 @@ export const OUTPOST = {
   // base = the solid pedestal zombies hit; box = no-build block (walls on its edge are allowed)
   core: { x: 0, z: 0, half: 1.5, top: 2.2, base: CORE_BASE, box: { min: [-3.8, -1, -3.8], max: [3.8, 60, 3.8] } },
   zone: 30,        // build radius around the Core
-  buyRadius: 6.5,  // shop at the Core (the glowing ring); survivors hold inside it
+  buyRadius: 11.7, // shop and banker at the Core (the glowing ring); survivors hold inside it
+  banker: { x: 5.2, z: -4.6, reach: 3.2 }, // the Banker's counter (selling) inside the ring
   stash: { x: 2.8, z: 2.8, box: STASH_BOX, reach: 2.6 },
   // zone = [minX, minZ, maxX, maxZ] where the horde appears; yaw = compass bearing seen from the Core
   lanes: [

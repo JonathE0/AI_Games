@@ -3,8 +3,7 @@
 // and there are no dynamic lights.
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { MAP_BOXES } from '/shared/map.js';
-import { OUTPOST, CORE_LADDERS } from '/shared/outpost.js';
+import { OUTPOST, OUTPOST_STATIC, CORE_LADDERS } from '/shared/outpost.js';
 
 const ZERO = new THREE.Matrix4().makeScale(0, 0, 0); // hidden instance
 const WHITE = new THREE.Color(1, 1, 1);
@@ -25,12 +24,12 @@ export const matTile = code => MATS[code]?.[2] ?? 1;
 // [color, texture name] a map box is drawn with (outdoor maps recolor a few materials).
 export function matLook(mat, id) {
   let [color, tex] = MATS[mat] || MATS.c;
-  if (id === 'lake' || id === 'outpost') {
-    if (mat === 'f') { color = id === 'outpost' ? 0x6f7f52 : 0x718557; tex = 'grass'; }
+  if (id === 'outpost') {
+    if (mat === 'f') { color = 0x6f7f52; tex = 'grass'; }
     if (mat === 'b') { color = 0x58714c; tex = 'grid4'; }
     if (mat === 'd') { color = 0xe6dcc2; tex = 'planks'; }
     if (mat === 'h') color = 0x485963;
-    if (id === 'outpost' && mat === 'c') { color = 0xb9b2a4; tex = 'stone'; }
+    if (mat === 'c') { color = 0xb9b2a4; tex = 'stone'; }
   }
   return [color, tex];
 }
@@ -289,28 +288,35 @@ export class World {
     this.applyAmbient();
   }
 
+  // 0 = off, 1 = Night Vision Goggles active: brighten the dark back up and push the view distance back out.
+  setNV(v) {
+    if (this.nvK === v) return;
+    this.nvK = v;
+    this.applyAmbient();
+  }
+
   applyAmbient() {
-    const k = this.duskK || 0, n = this.nightK || 0;
+    const k = this.duskK || 0, n = this.nightK || 0, v = this.nvK || 0;
     const day = new THREE.Color(0xb3cde0), dusk = new THREE.Color(0x3b3552), night = new THREE.Color(0x04060b);
     this.scene.background.copy(day).lerp(dusk, k).lerp(night, n);
     this.scene.fog.color.copy(this.scene.background);
-    this.scene.fog.near = (70 - 30 * k) * (1 - n) + 5 * n;
-    this.scene.fog.far = (160 - 60 * k) * (1 - n) + 42 * n;
-    this.hemi.intensity = (1.6 - 0.75 * k) * (1 - 0.93 * n);
+    this.scene.fog.near = ((70 - 30 * k) * (1 - n) + 8 * n) * (1 - v) + 10 * v;
+    this.scene.fog.far = ((160 - 60 * k) * (1 - n) + 58 * n) * (1 - v) + 75 * v;
+    this.hemi.intensity = (1.6 - 0.75 * k) * (1 - 0.86 * n) * (1 - v) + 2.2 * v;
     this.hemi.color.setHex(0xeef6ff).lerp(new THREE.Color(0x9c8cff), k).lerp(new THREE.Color(0x3a4a7a), n);
-    this.sun.intensity = (2.2 - 1.3 * k) * (1 - 0.96 * n);
+    this.sun.intensity = (2.2 - 1.3 * k) * (1 - 0.9 * n) * (1 - v) + 1.6 * v;
     this.sun.color.setHex(0xfff2de).lerp(new THREE.Color(0xff9a6b), k).lerp(new THREE.Color(0x8aa0ff), n);
-    const far = n > 0.3 ? 80 : 400;
+    const far = v > 0.3 ? 120 : n > 0.3 ? 95 : 400;
     if (this.camera.far !== far) { this.camera.far = far; this.camera.updateProjectionMatrix(); }
     if (this.coreFx?.beam) this.coreFx.beam.material.opacity = 0.18 + 0.25 * n; // the Core's beam is a landmark in the dark
   }
 
-  buildMap(boxes = MAP_BOXES, id = 'duel') {
+  buildMap(boxes = OUTPOST_STATIC, id = 'outpost') {
     this.mapId = id;
     const root = this.mapGroup = new THREE.Group();
     this.scene.add(root);
     const groups = {}, edges = [];
-    const outdoor = id === 'lake' || id === 'outpost';
+    const outdoor = id === 'outpost';
     for (const b of boxes) {
       if (outdoor && b.mat === 'b') continue; // invisible tall collision boundary; trees frame the horizon
       let geo;
@@ -337,7 +343,6 @@ export class World {
     root.add(new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22 })));
     this.coreFx = null;
     this.laneFx = null;
-    if (id === 'lake') this.buildLakeScenery(root);
     if (id === 'outpost') this.buildOutpostScenery(root);
   }
 
@@ -418,42 +423,6 @@ export class World {
   }
 
   coreHit() { if (this.coreFx) this.coreFx.hit = 1; }
-
-  buildLakeScenery(root) {
-    const mesh = (geo, color, x, y, z, opts = {}) => {
-      const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color, ...opts }));
-      m.position.set(x, y, z); m.receiveShadow = true; root.add(m); return m;
-    };
-    // Surrounding terrain continues beneath the tree line beyond the playable boundary.
-    mesh(new THREE.BoxGeometry(170, 0.1, 170), 0x718557, 0, -0.12, 0);
-    // Shallow water has a solid bed: walking off the pier never traps a player.
-    mesh(new THREE.BoxGeometry(69, 0.03, 15.7), 0x408c9e, 0, 0.025, 18.9,
-      { transparent: true, opacity: 0.76 });
-    for (let i = 0; i < 18; i++) {
-      mesh(new THREE.BoxGeometry(3 + i % 4, 0.012, 0.025), 0xa9d5d7,
-        -32 + (i * 13 % 64), 0.048, 12 + (i * 7 % 14));
-    }
-    // Tree line outside the playable walls, with foliage masking the arena edge.
-    for (let i = 0; i < 44; i++) {
-      const side = i % 4, n = Math.floor(i / 4), along = -34 + n * 6.8;
-      const x = side < 2 ? along : (side === 2 ? -37.5 : 37.5);
-      const z = side < 2 ? (side === 0 ? -29 : 29) : along * 0.76;
-      const height = 10 + i % 5;
-      mesh(new THREE.CylinderGeometry(0.24, 0.4, height), 0x66523c, x, height / 2, z);
-      const tree = mesh(new THREE.ConeGeometry(3.8, height, 7),
-        [0x324f3d,0x46644b,0x547153][i % 3], x, height * 0.85, z);
-      tree.castShadow = true;
-    }
-    // White trim around the upstairs windows and horizontal clapboard siding.
-    for (const z of [-8.02, 6.02]) {
-      for (const y of [3.25, 4.18, 5.52, 6.08])
-        mesh(new THREE.BoxGeometry(14.2, 0.1, 0.1), 0xf6f0dd, -2, y, z);
-    }
-    // Dock mooring bollards and a small boat beside the pier.
-    const boat = mesh(new THREE.BoxGeometry(1.5, 0.32, 3.8), 0xe9e0c8, 2.5, 0.23, 17);
-    boat.rotation.y = -0.12;
-    mesh(new THREE.BoxGeometry(1.08, 0.04, 2.8), 0x597a87, 2.5, 0.41, 17);
-  }
 
   // Bullet holes, particles and tracers are instanced: one draw call each no matter how many exist.
   buildEffects() {
@@ -571,7 +540,7 @@ export class World {
     this.burst(p, [-dir[0] * 0.3, 0.2, -dir[2] * 0.3], 0xb3121b, head ? 16 : 8, head ? 3.2 : 2);
   }
 
-  // Muzzle flash sprite at a world position (the opponent's gun).
+  // Muzzle flash sprite at a world position (another player's gun).
   flash(p) {
     const f = this.flashes.find(x => x.t <= 0) || this.flashes[0];
     f.s.position.set(...p);

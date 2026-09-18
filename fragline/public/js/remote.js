@@ -1,7 +1,6 @@
-// The opponent: snapshot buffer rendered 100 ms in the past (smooth interpolation), its model,
+// A teammate: snapshot buffer rendered 100 ms in the past (smooth interpolation), its model,
 // and its footsteps (running is audible, walking is silent).
 import { PlayerModel } from './models.js';
-import { MAP_BOXES } from '/shared/map.js';
 import { rayWorld } from '/shared/physics.js';
 
 const DOWN = [0, -1, 0], ORIGIN = [0, 0, 0];
@@ -10,8 +9,8 @@ const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
 const DELAY = 0.1;
 
 export class RemotePlayer {
-  // color: body color (Holdout teammates are blue, opponents red)
-  constructor(scene, id, boxes = MAP_BOXES, color = undefined) {
+  // color: body color (teammates are blue)
+  constructor(scene, id, boxes = [], color = undefined) {
     this.id = id;
     this.boxes = boxes;
     this.model = new PlayerModel(scene, color);

@@ -1,5 +1,5 @@
 // Specialist zombies (flags in shared/zombies.js), stepped from ai.js / the Holdout room:
-// snipers camping their gate, flying swoopers, burrowers tunnelling under a build, shieldbearers, bloater
+// snipers camping their gate, burrowers tunnelling under a build, shieldbearers, bloater
 // acid bursts, hexer ink, pyro fire trails, frost auras — and the burning / slowing / blinding they put on
 // players (armor resistances in shared/items.js cut those down).
 import { P, moveCharacter, blocked } from '../../shared/physics.js';
@@ -13,6 +13,16 @@ const face = (z, x, zz, dt, rate = 6) => {
   const want = Math.atan2(-(x - z.pos[0]), -(zz - z.pos[2]));
   z.yaw = wrap(z.yaw + Math.max(-rate * dt, Math.min(rate * dt, wrap(want - z.yaw))));
 };
+
+// Sniper shots lock a straight line (eye -> aim point) the moment the telegraph starts. On fire, only a
+// target still within `tol` of that exact line counts as hit — stepping out of the shown laser dodges it.
+export const BEAM_TOL = 0.6;
+export function onBeam(e, a, p, tol = BEAM_TOL) {
+  const dx = a[0] - e[0], dy = a[1] - e[1], dz = a[2] - e[2], l = Math.hypot(dx, dy, dz) || 1;
+  const ux = dx / l, uy = dy / l, uz = dz / l;
+  const t = Math.max(0, (p[0] - e[0]) * ux + (p[1] - e[1]) * uy + (p[2] - e[2]) * uz);
+  return Math.hypot(p[0] - (e[0] + ux * t), p[1] - (e[1] + uy * t), p[2] - (e[2] + uz * t)) <= tol;
+}
 
 // ---------- sniper: holds its gate, aims (a visible laser), fires ----------
 function sniperTargets(room, z, eye) {
@@ -39,18 +49,21 @@ export function stepSniper(room, z, dt, now) {
     if (c) face(z, c.at[0], c.at[2], dt, 3);
     if (now >= z.stateEnd) {
       z.state = S.STRIKE; z.stateEnd = now + 300; z.nextAtk = now + t.cooldown * 1000;
-      const alive = c && (c.kind === 'd' ? room.defenses.list.get(c.ref.id) === c.ref : c.ref.alive && !c.ref.downed);
-      if (alive) {
-        const at = c.kind === 'd' ? [c.ref.pos[0], c.ref.pos[1] + 1, c.ref.pos[2]] : [c.ref.st.p[0], c.ref.st.p[1] + 1.3, c.ref.st.p[2]];
-        const clear = room.lineOfSight(eye, at);
-        room.broadcast({ t: 'zshot', id: z.id, a: eye.map(r2), b: at.map(r2), hit: clear });
-        if (clear) {
-          if (c.kind === 'p') room.hurtPlayer(c.ref, t.dmg * mul, z);
-          else if (c.kind === 'sv') room.survivors.hurt(c.ref, t.npcDmg * mul);
-          else room.defenses.damage(c.ref, t.npcDmg * mul);
+      if (c) {
+        const from = z.lockEye ?? eye, at = c.at; // the exact line the telegraph showed, not a re-aim
+        const validEntity = c.kind === 'd' ? room.defenses.list.get(c.ref.id) === c.ref : (c.ref.alive && !c.ref.downed);
+        const clear = room.lineOfSight(from, at);
+        room.broadcast({ t: 'zshot', id: z.id, a: from.map(r2), b: at.map(r2), hit: clear });
+        if (clear && validEntity) {
+          const cur = c.kind === 'd' ? [c.ref.pos[0], c.ref.pos[1] + 1, c.ref.pos[2]] : c.kind === 'sv' ? [c.ref.pos[0], c.ref.pos[1] + 1.3, c.ref.pos[2]] : [c.ref.st.p[0], c.ref.st.p[1] + 1.3, c.ref.st.p[2]];
+          if (onBeam(from, at, cur)) { // still standing where the laser was aimed — didn't dodge
+            if (c.kind === 'p') room.hurtPlayer(c.ref, t.dmg * mul, z);
+            else if (c.kind === 'sv') room.survivors.hurt(c.ref, t.npcDmg * mul);
+            else room.defenses.damage(c.ref, t.npcDmg * mul);
+          }
         }
       }
-      z.target = null;
+      z.target = null; z.lockEye = null;
     }
     return;
   }
@@ -67,58 +80,8 @@ export function stepSniper(room, z, dt, now) {
   const c = z.aimAt;
   if (c) face(z, c.at[0], c.at[2], dt, 3);
   if (c && z.state === S.MOVE && now >= z.nextAtk) {
-    z.state = S.AIM; z.stateEnd = now + t.windup * 1000; z.target = c;
-    room.broadcast({ t: 'zaim', id: z.id, p: c.at.map(r2), ms: t.windup * 1000 });
-  }
-}
-
-// ---------- swooper: circles high, screeches, dives, climbs back ----------
-export function stepFlyer(room, z, dt, now) {
-  const t = z.t, pos = z.pos;
-  z.g = false;
-  if (now >= z.thinkAt) {
-    z.thinkAt = now + 300;
-    let best = null, bd = 50;
-    for (const p of room.targets()) {
-      if (!p.alive || p.downed || p.state === 'carried') continue;
-      const d = Math.hypot(p.st.p[0] - pos[0], p.st.p[2] - pos[2]);
-      if (d < bd) { bd = d; best = p; }
-    }
-    z.aggro = best;
-  }
-  const tg = z.aggro && z.aggro.alive && !z.aggro.downed ? z.aggro : null;
-  const home = tg ? tg.st.p : [room.map.core.x, 0, room.map.core.z];
-  if (z.state === S.STRIKE) { // diving
-    const aim = [home[0], home[1] + 1.1, home[2]], d = aim.map((v, i) => v - pos[i]), l = Math.hypot(...d);
-    const sp = 15;
-    for (let i = 0; i < 3; i++) z.vel[i] = (d[i] / Math.max(l, 1e-3)) * sp;
-    for (let i = 0; i < 3; i++) pos[i] += z.vel[i] * dt;
-    face(z, aim[0], aim[2], dt, 10);
-    if (tg && l < t.reach) { room.hurtPlayer(tg, t.dmg * room.director.dmgMul * (z.dmgMul ?? 1), z); z.state = S.MOVE; z.nextAtk = now + t.cooldown * 1000; z.climb = now + 1200; }
-    else if (now >= z.stateEnd || pos[1] < 0.6) { z.state = S.MOVE; z.nextAtk = now + t.cooldown * 700; z.climb = now + 1200; }
-    pos[1] = Math.max(0.6, pos[1]);
-    return;
-  }
-  if (z.state === S.WIND) { // screech, hanging in the air
-    for (let i = 0; i < 3; i++) z.vel[i] *= Math.exp(-dt * 6);
-    for (let i = 0; i < 3; i++) pos[i] += z.vel[i] * dt;
-    face(z, home[0], home[2], dt, 10);
-    if (now >= z.stateEnd) { z.state = S.STRIKE; z.stateEnd = now + 1300; }
-    return;
-  }
-  // cruise: orbit the target at altitude
-  z.orbit = (z.orbit ?? Math.random() * 6.28) + dt * 0.9;
-  const R = tg ? 8 : 14, alt = t.alt + Math.sin(now / 700 + z.id) * 1.2;
-  const want = [home[0] + Math.cos(z.orbit) * R, alt, home[2] + Math.sin(z.orbit) * R];
-  const d = want.map((v, i) => v - pos[i]), l = Math.hypot(...d), sp = t.speed * (z.spd ?? 1) * (now < z.slowUntil ? 1 - z.slow : 1);
-  const k = Math.min(1, dt * 3);
-  for (let i = 0; i < 3; i++) z.vel[i] += ((d[i] / Math.max(l, 1e-3)) * Math.min(sp, l * 2) - z.vel[i]) * k;
-  for (let i = 0; i < 3; i++) pos[i] += z.vel[i] * dt;
-  pos[1] = Math.max(0.8, pos[1]);
-  pos[0] = Math.max(-47, Math.min(47, pos[0])); pos[2] = Math.max(-47, Math.min(47, pos[2]));
-  face(z, pos[0] + z.vel[0], pos[2] + z.vel[2], dt, 8);
-  if (tg && now >= z.nextAtk && now >= (z.climb || 0) && Math.hypot(tg.st.p[0] - pos[0], tg.st.p[2] - pos[2]) < 13) {
-    z.state = S.WIND; z.stateEnd = now + t.windup * 1000;
+    z.state = S.AIM; z.stateEnd = now + t.windup * 1000; z.target = c; z.lockEye = eye;
+    room.broadcast({ t: 'zaim', id: z.id, a: eye.map(r2), p: c.at.map(r2), ms: t.windup * 1000 });
   }
 }
 
@@ -175,8 +138,8 @@ export function shieldBlocks(z, from, now) {
 }
 
 // ---------- hazards: acid pools (bloaters), ink clouds (hexers), fire patches (pyros) ----------
-export function addHazard(room, kind, p, r, life, dps = 0, sdps = 0) {
-  const h = { id: ++room.hzId, kind, p: [...p], r, until: Date.now() + life * 1000, dps, sdps, next: 0 };
+export function addHazard(room, kind, p, r, life, dps = 0, sdps = 0, zdps = 0, owner = null) {
+  const h = { id: ++room.hzId, kind, p: [...p], r, until: Date.now() + life * 1000, dps, sdps, zdps, owner, next: 0 };
   room.hazards.push(h);
   room.broadcast({ t: 'hz', id: h.id, k: kind, p: h.p.map(r2), r, life });
   return h;
@@ -188,7 +151,7 @@ export function bloaterBurst(room, z) {
     if (!p.alive || p.downed || p.state === 'carried') continue;
     if (Math.hypot(p.st.p[0] - z.pos[0], p.st.p[2] - z.pos[2]) <= b.radius) room.hurtPlayer(p, b.dmg * mul, z, 'acid');
   }
-  for (const s of room.builds()) if (distToBox(z.pos, s.box) <= b.radius) room.damagePiece(s, b.sdmg * mul);
+  for (const s of room.builds()) if (distToBox(z.pos, s.box) <= b.radius) room.damagePiece(s, b.sdmg * mul, z);
   addHazard(room, 'acid', z.pos, b.radius * 0.8, b.pool, b.dps * mul, 30 * mul);
   room.broadcast({ t: 'splat', id: 0, p: [r2(z.pos[0]), r2(z.pos[1] + 0.8), r2(z.pos[2])], big: 1 });
 }
@@ -206,6 +169,10 @@ export function updateHazards(room, now) {
       else if (h.dps) room.hurtPlayer(p, h.dps * 0.25, null, 'acid');
     }
     if (h.sdps) for (const s of room.builds()) if (distToBox(h.p, s.box) <= h.r) room.damagePiece(s, h.sdps * 0.25);
+    if (h.zdps) for (const z of room.zombies.values()) { // Brood Launcher bomblets: acid that only hurts zombies
+      if (z.dead || Math.hypot(z.pos[0] - h.p[0], z.pos[2] - h.p[2]) > h.r) continue;
+      room.damageZombie(z, h.zdps * 0.25, h.owner, 'broodlauncher');
+    }
   }
 }
 

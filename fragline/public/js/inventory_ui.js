@@ -1,14 +1,14 @@
-// Zombie Holdout inventory window (I): a Minecraft-style grid — armor slots beside a figure with your stats,
+// Zombie Holdout inventory window (E or I): a Minecraft-style grid — armor slots beside a figure with your stats,
 // the 18-slot backpack, the 6-slot hotbar, ammo / material counters and (at the Core's team chest) the
 // shared chest grid. Drag items between slots with the in-game cursor (or the real mouse when it is free),
 // drop them outside the window to throw them on the ground, shift-click to quick-move. The server checks
 // every move; this only draws and asks.
-import { WEAPONS } from '/shared/weapons.js';
+import { WEAPONS, BOSS_PERKS } from '/shared/weapons.js';
 import { AMMO, AMMO_IDS, ITEMS, ARMOR, ATTACH, CLASSES, ammoCap } from '/shared/holdout.js';
 import { ELEMENTS } from '/shared/elements.js';
-import { HOTBAR, INV_SIZE, STASH_SIZE, ARMOR_SLOTS, TIERS, TIER_COLORS, magFor, gunMult, itemName, armorStats, damageReduction, tierCost } from '/shared/items.js';
+import { HOTBAR, INV_SIZE, STASH_SIZE, SACK_SIZE, ARMOR_SLOTS, TIERS, TIER_COLORS, magFor, gunMult, itemName, armorStats, damageReduction, tierCost } from '/shared/items.js';
 import { MAT_IDS } from '/shared/build.js';
-import { itemLook } from './holdout_ui.js';
+import { itemLook, slotHTML } from './holdout_ui.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
@@ -23,13 +23,14 @@ export class InventoryUI {
     this.drag = null;     // { ref, it, x0, y0, moved }
     this.sel = null;      // slot ref shown in the info box
     this.atChest = false;
+    this.lastMouse = null; // real (unlocked) mouse position, for hotkeySwap when there's no virtual cursor
     this.ghost = document.createElement('div');
     this.ghost.id = 'invGhost';
     this.ghost.hidden = true;
     document.body.append(this.ghost);
     // a free mouse (no pointer lock) drives the same handlers as the in-game cursor
     this.onDown = e => { if (this.open && !this.g.input.locked && e.button === 0) { this.down(e.clientX, e.clientY, e.shiftKey); e.preventDefault(); } };
-    this.onMove = e => { if (this.open && !this.g.input.locked) this.move(e.clientX, e.clientY); };
+    this.onMove = e => { if (this.open && !this.g.input.locked) { this.lastMouse = [e.clientX, e.clientY]; this.move(e.clientX, e.clientY); } };
     this.onUp = e => { if (this.open && !this.g.input.locked && e.button === 0) this.up(e.clientX, e.clientY); };
     addEventListener('mousedown', this.onDown, true);
     addEventListener('mousemove', this.onMove);
@@ -42,17 +43,10 @@ export class InventoryUI {
     const h = this.h;
     if (ref.startsWith('a:')) return h.armor[ref.slice(2)] ?? null;
     const n = +ref.slice(1);
-    return ref[0] === 'i' ? h.inv[n] ?? null : ref[0] === 's' ? h.stash.items?.[n] ?? null : null;
+    return ref[0] === 'i' ? h.inv[n] ?? null : ref[0] === 's' ? h.stash.items?.[n] ?? null : ref[0] === 'k' ? h.sack[n] ?? null : null;
   }
 
-  slot(ref, it, extra = '') {
-    const look = itemLook(it);
-    const tier = look.tier ? `<i class="tier" style="color:${TIER_COLORS[look.tier]}">${TIERS[look.tier].name}</i>` : '';
-    const el = look.el ? `<i class="el" style="background:${look.el}"></i>` : '';
-    const n = look.n > 1 ? `<i class="n">${look.n}</i>` : '';
-    const sel = this.sel === ref ? ' sel' : '';
-    return `<div class="slot${it ? '' : ' empty'}${sel}" data-ref="${ref}" style="--rc:${look.color}">${extra}${tier}${el}<span>${esc(look.label)}</span>${n}</div>`;
-  }
+  slot(ref, it, extra = '') { return slotHTML(ref, it, this.sel === ref, extra); }
 
   // ---------- drawing ----------
   render() {
@@ -69,6 +63,8 @@ export class InventoryUI {
     const grid = (from, to, prefix, items) => Array.from({ length: to - from }, (_, k) => this.slot(prefix + (from + k), items[from + k])).join('');
     const keys = h.hotkeys();
     const hot = Array.from({ length: HOTBAR }, (_, k) => this.slot('i' + k, h.inv[k], `<b class="key">${keys[k]}</b>`)).join('');
+    const sackKeys = ['7', '8', '9', '0'];
+    const sack = Array.from({ length: SACK_SIZE }, (_, k) => this.slot('k' + k, h.sack[k], `<b class="key">${sackKeys[k]}</b>`)).join('');
     const counters = [
       ...AMMO_IDS.map(t => `<span class="chip" style="--c:${AMMO[t].color}">${AMMO[t].name.replace(' Ammo', '')} <b>${h.ammo[t] || 0}</b><small>/${ammoCap(t, h.cls)}</small></span>`),
       ...MAT_IDS.map(m => `<span class="chip mat ${m}">${m} <b>${h.mats[m] || 0}</b></span>`),
@@ -87,7 +83,8 @@ export class InventoryUI {
     $('bagGrid').innerHTML = `<div class="inv${this.atChest ? ' wide' : ''}">
       <div class="invSide">${figure}<div class="armor">${armor}</div><div class="stats">${stats}</div></div>
       <div class="invMain"><h3>BACKPACK</h3><div class="grid">${grid(HOTBAR, INV_SIZE, 'i', h.inv)}</div>
-        <h3>HOTBAR</h3><div class="grid hot">${hot}</div><div class="counters">${counters}</div></div>
+        <h3>HOTBAR</h3><div class="grid hot">${hot}</div>
+        <h3>SACK</h3><div class="grid sack">${sack}</div><div class="counters">${counters}</div></div>
       ${chest}</div>
       <div class="invInfo" id="invInfo">${this.infoHTML()}</div>
       <small class="invHelp">Drag to move · drop outside the window to throw it away · shift-click to quick-move · drop an attachment on a gun to fit it</small>`;
@@ -104,6 +101,7 @@ export class InventoryUI {
       const dmg = Math.round(w.dmg * gunMult(it) * (h.cls === 'assault' ? 1.2 : 1));
       parts.push(`${dmg}${w.pellets > 1 ? `×${w.pellets}` : ''} dmg · ${w.rpm} rpm · ${magFor(it, h.cls)} mag · ${AMMO[w.ammo]?.name ?? ''}`);
       if (it.el) parts.push(`<span style="color:${ELEMENTS[it.el].color}">${ELEMENTS[it.el].name}</span> rounds`);
+      if (w.boss) parts.push(`<span class="muted">${BOSS_PERKS[w.id]}</span>`);
       const att = Object.values(it.att || {}).filter(Boolean).map(a => ATTACH[a]?.name);
       if (att.length) parts.push('Fitted: ' + att.join(', '));
     } else if (it.kind === 'armor') {
@@ -151,6 +149,16 @@ export class InventoryUI {
 
   // ---------- pointer (in-game cursor or real mouse) ----------
   slotAt(x, y) { return document.elementFromPoint(x, y)?.closest('#bagMenu .slot') ?? null; }
+
+  // Minecraft-style: hovering a slot (any box, including the team chest) and pressing 1-6 swaps it into that hotbar slot.
+  hotkeySwap(idx, vcur) {
+    if (this.drag) return;
+    const pos = vcur || this.lastMouse;
+    if (!pos) return;
+    const el = this.slotAt(...pos), ref = el?.dataset.ref;
+    if (!ref || ref === 'i' + idx) return;
+    this.g.net.send({ t: 'move', from: ref, to: 'i' + idx });
+  }
 
   down(x, y, shift = false) {
     const b = document.elementFromPoint(x, y)?.closest('#bagMenu button');

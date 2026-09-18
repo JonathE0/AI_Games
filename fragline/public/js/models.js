@@ -12,7 +12,10 @@ const ITEM_LOOK = {
   throw: [[0.07, 0.07, 0.07], 0x4d6b35], heal: [[0.1, 0.07, 0.12], 0xd94040], shield: [[0.06, 0.1, 0.06], 0x3f8cff],
   trap: [[0.14, 0.04, 0.14], 0x6b7280], deploy: [[0.12, 0.1, 0.12], 0x3a3f46], armor: [[0.14, 0.12, 0.06], 0x55606b], attach: [[0.05, 0.05, 0.1], 0x2b2f35],
 };
-const ITEM_COLOR = { molotov: 0xc9772e, freeze: 0x9ff2ff, bandage: 0xe9e2d0, campfire: 0xff8a3c, flame: 0xe0632d, rturret: 0x4b5a3e, shield_s: 0x7fb8ff };
+const ITEM_COLOR = {
+  molotov: 0xc9772e, freeze: 0x9ff2ff, bandage: 0xe9e2d0, campfire: 0xff8a3c, flame: 0xe0632d, rturret: 0x4b5a3e, shield_s: 0x7fb8ff,
+  gturret: 0x767b80, frturret: 0x8fd6e8, flturret: 0x8a2f1c, tesla: 0x9d8bf0, mortar: 0x3c4034,
+};
 
 const BOX = new THREE.BoxGeometry(1, 1, 1);
 const CYL = new THREE.CylinderGeometry(1, 1, 1, 12).rotateX(Math.PI / 2);
@@ -45,6 +48,12 @@ function cyl(parent, color, r, len, pos) {
 }
 
 const GUN_LEN = { melee: 0.28, pistol: 0.22, smg: 0.46, shotgun: 0.85, rifle: 0.8, sniper: 1.05, launcher: 0.95 };
+// Boss-drop guns reuse an existing model with a distinct finish (a = body, b = accent/glow, c = dark trim).
+const BOSS_FINISH = {
+  skybreaker: { a: 0x8a6a1a, b: 0x5a2f9c },
+  broodlauncher: { b: 0x8fe03a, c: 0x1f2b16 },
+  mawfang: { a: 0x3a1414, b: 0xd9d0b0 },
+};
 const skinId = id => WEAPONS[id]?.skinOf || id; // Holdout's SSG/AWP wear the same skins
 const skin3P = {};
 const skinMat3P = id => (skin3P[id] ??= (() => {
@@ -92,7 +101,7 @@ export class PlayerModel {
     this.gunPivot.rotation.x = pitch * 0.8;
     if (weapon !== this.weapon) {
       this.weapon = weapon;
-      this.gun.material = weapon === 'knife' ? mat(0x2b5ce0) : skinMat3P(weapon); // skins on the opponent's gun too
+      this.gun.material = weapon === 'knife' ? mat(0x2b5ce0) : skinMat3P(weapon); // skins on teammates' guns too
       const len = GUN_LEN[WEAPONS[weapon]?.cat] ?? 0.5;
       this.gun.scale.set(0.05, 0.08, len);
       this.gun.position.set(0, 0, -len / 2 - 0.05);
@@ -261,13 +270,15 @@ function buildGun(model, id) {
       box(g, DARK, [0.02, 0.02, 0.06], [0, 0.01, -0.26]);
       muzzle = -0.29;
       break;
-    case 'shotgun':
-      box(g, DARK, [0.05, 0.07, 0.28], [0, 0, 0]);
+    case 'shotgun': { // the Maw Fang: dark red with bone-white accents
+      const boss = BOSS_FINISH[id];
+      box(g, boss ? boss.a : DARK, [0.05, 0.07, 0.28], [0, 0, 0]);
       box(g, 0x2e3238, [0.026, 0.026, 0.5], [0, 0.02, -0.38]);
-      box(g, WOOD, [0.046, 0.046, 0.14], [0, -0.02, -0.3]);
-      box(g, WOOD, [0.04, 0.09, 0.25], [0, -0.03, 0.25], [-0.15, 0, 0]);
+      box(g, boss ? boss.b : WOOD, [0.046, 0.046, 0.14], [0, -0.02, -0.3]);
+      box(g, boss ? boss.b : WOOD, [0.04, 0.09, 0.25], [0, -0.03, 0.25], [-0.15, 0, 0]);
       muzzle = -0.63;
       break;
+    }
     case 'ak': case 'galil': case 'm4': case 'm4s': {
       const ak = model === 'ak', gal = model === 'galil';
       const body = ak ? 0x2b2b2b : gal ? 0x4a5240 : 0x1f2226;
@@ -284,11 +295,11 @@ function buildGun(model, id) {
       break;
     }
     case 'ssg': case 'awp': {
-      const awp = model === 'awp';
-      const body = awp ? 0x445e3e : 0x3a3f46;
+      const awp = model === 'awp', boss = BOSS_FINISH[id]; // the Skybreaker: gold body, purple scope/stripe
+      const body = boss ? boss.a : awp ? 0x445e3e : 0x3a3f46;
       box(g, body, [0.06, 0.08, 0.5], [0, 0, 0.02]);
-      box(g, 0x2a2a2a, [0.022, 0.022, 0.55], [0, 0.015, -0.5]);
-      cyl(g, 0x1b1d21, awp ? 0.03 : 0.022, awp ? 0.32 : 0.26, [0, 0.085, -0.02]);
+      box(g, boss ? boss.b : 0x2a2a2a, [0.022, 0.022, 0.55], [0, 0.015, -0.5]);
+      cyl(g, boss ? boss.b : 0x1b1d21, awp ? 0.03 : 0.022, awp ? 0.32 : 0.26, [0, 0.085, -0.02]);
       box(g, body, [0.05, 0.1, 0.3], [0, -0.03, 0.38], [-0.1, 0, 0]);
       box(g, 0x30343a, [0.035, 0.12, 0.05], [0, -0.08, -0.08], [0.1, 0, 0]);
       muzzle = -0.78;
@@ -313,13 +324,15 @@ function buildGun(model, id) {
       g.userData.muzzle = new THREE.Vector3(0, 0, -0.15);
       return g;
     }
-    case 'gl': // stubby grenade launcher with a drum
-      box(g, 0x3a4436, [0.07, 0.08, 0.34], [0, 0, -0.05]);
+    case 'gl': { // stubby grenade launcher with a drum (the Brood Launcher: acid green)
+      const boss = BOSS_FINISH[id];
+      box(g, boss ? boss.c : 0x3a4436, [0.07, 0.08, 0.34], [0, 0, -0.05]);
       cyl(g, 0x2b2f35, 0.045, 0.3, [0, 0.02, -0.34]);
-      cyl(g, 0x4b5a3e, 0.06, 0.12, [0, -0.04, -0.08]);
+      cyl(g, boss ? boss.b : 0x4b5a3e, 0.06, 0.12, [0, -0.04, -0.08]);
       box(g, 0x30343a, [0.035, 0.13, 0.05], [0, -0.1, 0.05], [-0.25, 0, 0]);
       muzzle = -0.5;
       break;
+    }
     case 'kinetic': // the Shockwave Blaster: a flared emitter with a glowing core
       box(g, 0x2e3440, [0.08, 0.09, 0.36], [0, 0, 0]);
       cyl(g, 0x5a6a80, 0.07, 0.12, [0, 0.01, -0.26]);
@@ -327,13 +340,16 @@ function buildGun(model, id) {
       box(g, 0x30343a, [0.035, 0.13, 0.05], [0, -0.1, 0.07], [-0.25, 0, 0]);
       muzzle = -0.36;
       break;
-    case 'blade': // the Stalker's machete
-      box(g, 0xc9d1db, [0.012, 0.07, 0.42], [0, 0.03, -0.26]);
+    case 'blade': { // the Stalker's machete (the Alpha Cleaver: bigger, dark steel, a red edge)
+      const boss = id === 'cleaver', len = boss ? 0.52 : 0.42, off = boss ? -0.31 : -0.26;
+      box(g, boss ? 0x3a3d42 : 0xc9d1db, [boss ? 0.016 : 0.012, boss ? 0.09 : 0.07, len], [0, 0.03, off]);
+      if (boss) box(g, 0xc21e2b, [0.004, 0.09, len], [0.012, 0.03, off]);
       box(g, 0x2b2020, [0.03, 0.04, 0.12], [0, 0, 0.02]);
       box(g, GLOVE, [0.05, 0.06, 0.075], [0.005, -0.01, 0.02]);
       limb(g, SLEEVE, [0.01, -0.03, 0.06], [0.14, -0.3, 0.34], 0.07);
-      g.userData.muzzle = new THREE.Vector3(0, 0, -0.3);
+      g.userData.muzzle = new THREE.Vector3(0, 0, boss ? -0.36 : -0.3);
       return g;
+    }
     case 'minigun': { // six spinning barrels
       box(g, 0x2e3238, [0.14, 0.14, 0.34], [0, -0.02, 0.05]);
       const barrels = new THREE.Group();

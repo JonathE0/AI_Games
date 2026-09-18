@@ -1,10 +1,14 @@
-// Placed defenses: floor spikes and flame grills on built floors, wall darts on a wall face, auto turrets,
-// rocket turrets and campfires on the ground or on a floor. Traps credit their owner with kills.
+// Placed defenses: floor spikes and flame grills on built floors, wall darts on a wall face, the turret
+// family (auto/gatling/frost/rocket/flame/tesla/mortar) and campfires on the ground or on a floor. Traps
+// credit their owner with kills.
 import { DEFENSES, ITEMS } from '../../shared/holdout.js';
 import { GRID, REACH, distToBox, overlaps } from '../../shared/build.js';
 import { addItem, countOf, takeItem } from './inventory.js';
 
 const r2 = v => Math.round(v * 100) / 100;
+const HITSCAN = ['turret', 'gturret', 'frturret', 'tesla']; // fire instantly at one target
+const PROJECTILE = ['rturret', 'mortar'];                    // launch a tracked rocket (combat.js)
+export const FORCED_EL = { frturret: 'ice', tesla: 'shock' }; // these two always carry their element
 
 export class Defenses {
   constructor(room) { this.room = room; this.reset(); }
@@ -89,12 +93,15 @@ export class Defenses {
         if (now >= d.until) { this.remove(d); continue; }
         if (now < d.next) continue;
         d.next = now + 500;
-        const heal = DEFENSES.campfire.heal * 0.5;
+        const heal = DEFENSES.campfire.heal * 0.5, shield = DEFENSES.campfire.shield * 0.5, shCap = ITEMS.shield.cap;
         for (const q of [...room.players, ...room.survivors.list.values()]) {
           if (!q.alive || q.downed || Math.hypot(q.st.p[0] - d.pos[0], q.st.p[2] - d.pos[2]) > DEFENSES.campfire.radius) continue;
           if (q.isSurvivor) { room.survivors.heal(q, heal * 3); continue; }
-          const max = q.maxHp ?? 100;
-          if (q.hp < max) { q.hp = Math.min(max, q.hp + heal); room.sendInv(q); }
+          const max = q.maxHp ?? 200;
+          let changed = false;
+          if (q.hp < max) { q.hp = Math.min(max, q.hp + heal); changed = true; }
+          if (q.shield < shCap) { q.shield = Math.min(shCap, q.shield + shield); changed = true; }
+          if (changed) room.send(q, { t: 'vit', hp: Math.round(q.hp), sh: Math.round(q.shield), rally: true }); // light update, twice a second
         }
         continue;
       }
@@ -111,24 +118,48 @@ export class Defenses {
         }
         this.fx.push([d.id, 0]);
         if (--d.uses <= 0) this.remove(d);
-      } else if (d.type === 'turret' || d.type === 'rturret') {
+      } else if (HITSCAN.includes(d.type) || PROJECTILE.includes(d.type)) {
         const eye = [d.pos[0], d.pos[1] + 1.2, d.pos[2]], md = d.mods ?? {};
-        let best = null, bd = def.range * (1 + 0.2 * (md.range || 0));
+        const range = def.range * (1 + 0.2 * (md.range || 0)), minRange = def.minRange || 0;
+        let best = null, bd = range;
         for (const z of room.zombies.values()) {
           if (z.dead) continue;
           const dist = Math.hypot(z.pos[0] - eye[0], z.pos[2] - eye[2]);
-          if (dist < bd && room.lineOfSight(eye, [z.pos[0], z.pos[1] + 1.1 * z.s, z.pos[2]])) { bd = dist; best = z; }
+          if (dist < minRange || dist >= bd) continue; // mortar: can't hit anything too close
+          if (room.lineOfSight(eye, [z.pos[0], z.pos[1] + 1.1 * z.s, z.pos[2]])) { bd = dist; best = z; }
         }
         if (!best) { d.next = now + 250; continue; }
         d.next = now + 1000 / (def.rate * (1 + 0.2 * (md.rate || 0)));
-        const aim = [best.pos[0], best.pos[1] + 1.1 * best.s, best.pos[2]], dmg = def.dmg * (1 + 0.25 * (md.dmg || 0)), el = md.inc ? 'fire' : md.frost ? 'ice' : null;
-        if (d.type === 'turret') {
-          room.damageZombie(best, dmg * (room.buffActive('damage') ? 1.3 : 1), this.owner(d), 'turret');
+        const aim = [best.pos[0], best.pos[1] + 1.1 * best.s, best.pos[2]], dmg = def.dmg * (1 + 0.25 * (md.dmg || 0));
+        const el = FORCED_EL[d.type] || (md.inc ? 'fire' : md.frost ? 'ice' : null);
+        if (HITSCAN.includes(d.type)) {
+          room.damageZombie(best, dmg * (room.buffActive('damage') ? 1.3 : 1), this.owner(d), d.type);
           if (el && !best.dead) room.applyElement(best, el, dmg, this.owner(d));
         } else {
           const dir = aim.map((v, j) => v - eye[j]), l = Math.hypot(...dir);
           room.combat.rocket([...eye], dir.map(v => v / l), this.owner(d), dmg, def.splash, el);
         }
+        this.fx.push([d.id, best.id]);
+        if (--d.ammo <= 0) this.remove(d);
+      } else if (d.type === 'flturret') {
+        const eye = [d.pos[0], d.pos[1] + 1.0, d.pos[2]], md = d.mods ?? {};
+        const range = def.range * (1 + 0.2 * (md.range || 0));
+        let best = null, bd = range;
+        for (const z of room.zombies.values()) {
+          if (z.dead) continue;
+          const dist = Math.hypot(z.pos[0] - eye[0], z.pos[2] - eye[2]);
+          if (dist < bd && room.lineOfSight(eye, [z.pos[0], z.pos[1] + 1.1 * z.s, z.pos[2]])) { bd = dist; best = z; }
+        }
+        if (!best) { d.next = now + 150; continue; }
+        const dx0 = best.pos[0] - eye[0], dz0 = best.pos[2] - eye[2], dl0 = Math.hypot(dx0, dz0) || 1, ux = dx0 / dl0, uz = dz0 / dl0;
+        const hit = [...room.zombies.values()].filter(z => {
+          if (z.dead) return false;
+          const zx = z.pos[0] - eye[0], zz = z.pos[2] - eye[2], zl = Math.hypot(zx, zz) || 1;
+          return zl < range && (zx * ux + zz * uz) / zl > def.cos; // inside the cone in front of it
+        });
+        d.next = now + (def.tick * 1000) / (1 + 0.2 * (md.rate || 0));
+        const dmg = def.dmg * (1 + 0.25 * (md.dmg || 0));
+        for (const z of hit) { z.burnUntil = now + def.burnTime * 1000; z.burnDps = def.burn; z.burnBy = this.owner(d); room.damageZombie(z, dmg, this.owner(d), 'flturret'); }
         this.fx.push([d.id, best.id]);
         if (--d.ammo <= 0) this.remove(d);
       }

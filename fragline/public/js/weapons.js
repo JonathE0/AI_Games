@@ -5,7 +5,7 @@
 // minigun, the rocket launcher, and sniper shots at the Colossus' weak points.
 import { WEAPONS, maxSpeed } from '../../shared/weapons.js';
 import { magFor, HOTBAR } from '../../shared/items.js';
-import { traceBullet, dirFromAngles } from '../../shared/physics.js';
+import { traceBullet, dirFromAngles, rayPlayer } from '../../shared/physics.js';
 import { raySphere } from '../../shared/skyboss.js';
 import { ELEMENTS } from '../../shared/elements.js';
 
@@ -143,11 +143,12 @@ export class Weapons {
     this.scope = this.rezoom = 0;
     this.inspectStart = -1;
     this.reloadStart = now;
+    const rm = this.g.holdout?.reloadMult ?? 1; // Gunnery team upgrade: reloads faster
     if (w.shellReload) {
       this.reloadEnd = Infinity;
-      this.shellNext = now + w.reloadStart + w.reload;
+      this.shellNext = now + w.reloadStart + w.reload / rm;
     } else {
-      this.reloadEnd = now + w.reload;
+      this.reloadEnd = now + w.reload / rm;
       this.reloadSrcs = this.g.sound.reloadSeq(w, { vol: 1 });
     }
     this.g.net.send({ t: 'snd', s: 'reload', w: w.id });
@@ -161,7 +162,9 @@ export class Weapons {
 
   reloadProgress() {
     if (!this.reloadEnd) return -1;
-    return this.w.shellReload ? 0.35 : Math.min(1, (this.g.now - this.reloadStart) / this.w.reload);
+    if (this.w.shellReload) return 0.35;
+    const rm = this.g.holdout?.reloadMult ?? 1;
+    return Math.min(1, (this.g.now - this.reloadStart) / (this.w.reload / rm));
   }
 
   deployProgress() { return Math.min(1, 1 - (this.deployEnd - this.g.now) / this.deployDur); }
@@ -175,8 +178,7 @@ export class Weapons {
     if (w.scope && !this.scope) base = a.unscoped;
     if (!this.scope && this.cur.item?.att?.rail === 'laser') base *= 0.7; // laser sight
     const mf = Math.min(1, Math.max(0, (pl.speed - w.speed * 0.34) / (w.speed * 0.66)));
-    const airAccurate = this.g.mode?.airAccurate && w.id === 'ssg08' && !pl.grounded;
-    return base + (airAccurate ? 0 : a.move * mf + (pl.grounded ? 0 : a.air)) + this.bloom;
+    return base + a.move * mf + (pl.grounded ? 0 : a.air) + this.bloom;
   }
 
   altPressed() {
@@ -220,7 +222,7 @@ export class Weapons {
         if (this.pooled) a.granted--; else a.reserve--;
         g.sound.play('shell', { vol: 0.9 });
         g.net.send({ t: 'snd', s: 'shell', w: w.id });
-        this.shellNext = now + w.reload;
+        this.shellNext = now + w.reload / (g.holdout?.reloadMult ?? 1);
       } else if (this.pooled && a.pending && a.mag < this.mag) this.shellNext = now + 0.1;
       const left = this.pooled ? a.granted + (a.pending ? 1 : 0) : a.reserve;
       if (a.mag >= this.mag || left <= 0) { this.reloadEnd = 0; g.sound.play('rl_pump', { vol: 0.9, delay: 0.05 }); }
@@ -332,6 +334,21 @@ export class Weapons {
         if (tr.player) {
           hits.push({ part: tr.player.part, pen: r3(tr.player.pen), id: tr.player.id, k }); // k: pellet (its direction is d[k])
           g.world.blood(end, d, tr.player.part === 'head');
+        }
+      }
+      if (w.pierce && Array.isArray(target) && target.length) { // Skybreaker: every zombie along the line, up to where a wall stops it
+        const wallEnd = traceBullet(eye, d, 400, g.boxes, null, w.wallPen).endT;
+        const already = new Set(tr.player ? [tr.player.id] : []);
+        const found = [];
+        for (const tg of target) {
+          if (already.has(tg.id)) continue;
+          const r = rayPlayer(eye, d, wallEnd, tg);
+          if (r) found.push(r);
+        }
+        found.sort((a, b) => a.t - b.t);
+        for (const r of found.slice(0, Math.max(0, w.pierce - hits.length))) {
+          hits.push({ part: r.part, pen: 1, id: r.id, k });
+          g.world.blood(at(r.t), d, r.part === 'head');
         }
       }
       dirs.push(d.map(r3));

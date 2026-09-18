@@ -7,8 +7,8 @@ import { OUTPOST, OUTPOST_STATIC, CORE_LADDERS } from '/shared/outpost.js';
 import { BMATS, REACH, distToBox } from '/shared/build.js';
 import { WAVES } from '/shared/zombies.js';
 import { WEAPONS } from '/shared/weapons.js';
-import { RARITY, AMMO, ITEMS, POWERUPS, BUFF, THROWABLES, HEALS, SURVIVOR, ARMOR, CLASSES, SMITH } from '/shared/holdout.js';
-import { HOTBAR, INV_SIZE, ARMOR_SLOTS, countIn, itemName, armorStats } from '/shared/items.js';
+import { RARITY, AMMO, ITEMS, POWERUPS, BUFF, THROWABLES, HEALS, SURVIVOR, SURVIVOR_CLASSES, ARMOR, CLASSES, SMITH, CORE_UP_IDS } from '/shared/holdout.js';
+import { HOTBAR, INV_SIZE, SACK_SIZE, ARMOR_SLOTS, countIn, itemName, armorStats } from '/shared/items.js';
 import { SKY } from '/shared/skyboss.js';
 import { rayWorld, blocked, bodyHeight, topAt, dirFromAngles } from '/shared/physics.js';
 import { ZombieView } from './zombies.js';
@@ -16,7 +16,7 @@ import { Structures, Nodes, BuildMode, EditMode } from './build.js';
 import { Entities } from './holdout_ents.js';
 import { Props } from './props.js';
 import { NightFx } from './night.js';
-import { hotbarHTML, buyHTML, smithHTML, saveRecord, recordText } from './holdout_ui.js';
+import { hotbarHTML, buyHTML, smithHTML, bankHTML, saveRecord, recordText } from './holdout_ui.js';
 import { InventoryUI } from './inventory_ui.js';
 import { Minimap } from './minimap.js';
 import { setText, setHTML, setClass, setStyle, setHidden, hudReset, keyName } from './hud.js';
@@ -35,12 +35,24 @@ const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2,
 const bearing = (from, x, z) => Math.atan2(-(x - from[0]), -(z - from[2])); // yaw that faces (x, z)
 const dist3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 const _v = new THREE.Vector3();
+const hex = n => '#' + n.toString(16).padStart(6, '0');
 
 function pickupName(pk) {
   if (pk.kind === 'it') return itemName({ id: pk.key, kind: pk.ik, r: pk.r, tier: pk.t, el: pk.el, n: pk.n }) + (pk.ik !== 'gun' && pk.ik !== 'armor' && pk.n > 1 ? ` ×${pk.n}` : '');
   if (pk.kind === 'svsupply') return 'survivor supplies';
   if (pk.kind === 'ammo') return `${AMMO[pk.key]?.name} ×${pk.n}`;
   return `${pk.key} ×${pk.n}`;
+}
+
+// A small tile of grayscale static for the Night Vision grain overlay (#fxNVGrain); generated once, jittered
+// each frame by scrolling its background-position.
+function noiseTile(n = 64) {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = n;
+  const ctx = cv.getContext('2d'), img = ctx.createImageData(n, n);
+  for (let i = 0; i < img.data.length; i += 4) { const v = (Math.random() * 255) | 0; img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255; }
+  ctx.putImageData(img, 0, 0);
+  return cv.toDataURL();
 }
 
 export class Holdout {
@@ -54,6 +66,12 @@ export class Holdout {
     this.nightFx = new NightFx(game);
     this.nightK = 0;
     this.flashOn = false;
+    this.flashOffThisNight = false; // a manual off during a night blocks that night's auto-on, not the next one
+    this.nvK = 0;                   // Night Vision Goggles: eased 0..1 activation factor
+    this.nvUp = false;              // flipped up (off) by the player
+    this.nvWasActive = false;
+    this.shadeStingAt = 0;          // global cooldown for the shade_sting jump-scare cue
+    $('fxNVGrain').style.backgroundImage = `url(${noiseTile()})`;
     this.build = new BuildMode(game, this);
     this.edit = new EditMode(game, this);
     this.ents = new Entities(game.world, game.sound);
@@ -66,16 +84,20 @@ export class Holdout {
     this.ammo = {};
     this.items = {};                              // item id -> how many you carry (summed over the grid)
     this.inv = Array(INV_SIZE).fill(null);         // 0-5 hotbar, 6-23 backpack
+    this.sack = Array(SACK_SIZE).fill(null);       // 4-slot consumables pouch
     this.armor = Object.fromEntries(ARMOR_SLOTS.map(s => [s, null]));
     this.cls = null;
-    this.maxHp = 100;
+    this.maxHp = 200;
     this.stash = { money: 0, mats: { wood: 0, stone: 0, metal: 0 }, ammo: {}, items: [] };
     Object.assign(this, {
       phase: 'lobby', wave: 0, waves: WAVES, core: [1, 1], lanes: [], next: [], left: 0, end: 0, diff: welcome.diff || 'normal',
       downed: false, bleedEnd: 0, respawnAt: 0, roster: [], reviveId: null, reviveStart: 0, lastInteract: 0,
       alertUntil: 0, alertText: '', shadowAt: 0, shadowDirty: true, groanAt: 0, dusk: 0, shield: 0, carrying: null,
       activeThrow: null, payBank: false, using: null, hold: null, holdLock: false, coreHealer: null, buffs: {},
-      task: null, shake: 0, bagAtChest: false, it: null,
+      task: null, shake: 0, bagAtChest: false, it: null, shopTab: 'shop', buyback: null, bankSel: null,
+      teamUps: { vitality: 0, firepower: 0, engineering: 0, gunnery: 0 },
+      coreLevel: 0, coreUps: Object.fromEntries(CORE_UP_IDS.map(id => [id, 0])),
+      nvManualOn: false, adrenUntil: 0, adrenPulseAt: 0, rallyUntil: 0, rallyK: 0,
     });
     this.tags = new Map();
     this.invUI = new InventoryUI(this);
@@ -89,9 +111,11 @@ export class Holdout {
   // run speed on top of the weapon limit: class, Swift Step boots, the Slasher Blade in hand
   get speedMult() {
     const st = this.as ?? (this.as = armorStats(this.armor)), slowed = this.pfx && this.g.now < this.pfx.slowUntil ? 1 - this.pfx.slow : 1;
-    return (CLASSES[this.cls]?.speed ?? 1) * (1 + st.speed) * (this.g.weapons.w?.speedBuff ?? 1) * slowed;
+    const adren = this.g.now < this.adrenUntil ? ITEMS.adrenaline.speedMult : 1;
+    return (CLASSES[this.cls]?.speed ?? 1) * (1 + st.speed) * (this.g.weapons.w?.speedBuff ?? 1) * slowed * adren;
   }
-  get rateMult() { return this.g.now < (this.buffs.rate || 0) ? BUFF.rate : 1; }
+  get rateMult() { return (this.g.now < (this.buffs.rate || 0) ? BUFF.rate : 1) * (1 + 0.06 * (this.teamUps.gunnery || 0)); }
+  get reloadMult() { return 1 + 0.1 * (this.teamUps.gunnery || 0); }
   blocksShooting() { return this.build.active || this.edit.active || this.downed || !!this.carrying || !!this.using; }
   targets() { return this.zombies.targets(); }
   skyTargets() { return this.ents.skyTargets(performance.now() / 1000); }
@@ -128,6 +152,8 @@ export class Holdout {
   }
 
   nearStash() { const p = this.g.player.pos; return Math.hypot(p[0] - OUTPOST.stash.x, p[2] - OUTPOST.stash.z) < OUTPOST.stash.reach + 0.6; }
+
+  nearBanker() { const p = this.g.player.pos; return Math.hypot(p[0] - OUTPOST.banker.x, p[2] - OUTPOST.banker.z) < OUTPOST.banker.reach + 0.8; }
 
   // ---------- messages ----------
   onMsg(m) {
@@ -178,11 +204,15 @@ export class Holdout {
       case 'dall': return this.ents.setDefs(m.l);
       case 'ddel': return this.ents.removeDef(m.id);
       case 'dfx': return this.ents.defFx(m.l, this.zombies);
+      case 'corefx': return this.ents.coreFx(m.l, this.zombies);
       case 'thr': return this.ents.addThrown(m);
       case 'rkt': return this.ents.addRocket(m);
       case 'blast': this.ents.blastFx(m); if (m.by !== this.g.me.id) this.g.sound.play('shot_kinetic', { pos: m.o, vol: 1, ref: 4 }); return;
+      case 'slam': return this.ents.slamFx(m);
+      case 'bite': return this.ents.biteFx(m);
       case 'arc': return this.ents.arcFx(m.a, m.b);
-      case 'zaim': this.ents.laser(m.id, m.p, m.ms); { const z = this.zombies.list.get(m.id); if (z) this.g.sound.play('scope', { pos: z.pos, vol: 1, ref: 8, rate: 0.7 }); } return;
+      case 'zaim': this.ents.laser(m.id, m.a, m.p, m.ms, this.nightK > 0.3); { const z = this.zombies.list.get(m.id); if (z) this.g.sound.play('scope', { pos: z.pos, vol: 1, ref: 8, rate: 0.7 }); } return;
+      case 'gsmash': { this.ents.golemSmash(m.p); const d = Math.hypot(m.p[0] - this.g.player.pos[0], m.p[2] - this.g.player.pos[2]); if (d < 12) this.shake = Math.max(this.shake, 1 - d / 12); return; }
       case 'zshot': this.g.world.tracer(m.a, m.b, 0xff4040); this.g.sound.play('shot_awp', { pos: m.a, vol: 1.3, ref: 12, roll: 0.6 }); return;
       case 'zdig': return this.ents.dig(m);
       case 'zup': this.world.burst(m.p, [0, 1, 0], 0x6b5237, 30, 5); this.g.sound.play('break_S', { pos: m.p, vol: 1, ref: 4 }); this.shake = Math.max(this.shake, 0.4); return;
@@ -196,19 +226,28 @@ export class Holdout {
       case 'dmod': { const d = this.ents.defs.get(m.id); if (d) Object.assign(d, { mods: m.mods, ammo: m.ammo }); if (this.g.ui === 'smith') this.renderSmith(); return; }
       case 'pfx': return this.onEffects(m);
       case 'boom': this.shake = Math.max(this.shake, this.ents.boom(m, this.g.player.eye)); return;
-      case 'svadd': return this.ents.svAdd(m.id, m.name, m.tier ?? 0);
+      case 'svadd': return this.ents.svAdd(m.id, m.name, m.tier ?? 0, m.cls);
       case 'svs': this.ents.svState(m.l, m.shots); return;
       case 'svdie': this.ents.svDie(m.id); this.alert(`SURVIVOR ${String(m.name).toUpperCase()} PERISHED`, 3); this.g.sound.play('lose', { vol: 0.4 }); return;
       case 'sky': this.ents.skyStart(m, now); this.g.hud.banner('THE COLOSSUS', 'Snipe its glowing weak points (SSG 08 / AWP)', 'lose', 5000); return;
       case 'skyhit': this.ents.skyHit(m.i, m.hp); if (m.by === this.g.me.id) this.g.sound.play('headshot', { vol: 0.8 }); return;
       case 'skydie': this.ents.skyDie(); this.g.hud.banner('COLOSSUS DOWN', `${this.g.name(m.by)} broke the last weak point · loot dropped`, 'win', 4500); return;
+      case 'skyback': this.ents.skyBack(m.i); return;
       case 'task': this.task = { text: m.text, until: this.g.now + 14 }; this.g.hud.banner('NEW TASK', m.text, '', 4500); this.g.sound.play('round_start', { vol: 0.5 }); return;
       case 'coreheal': this.coreHealer = m.id; return;
-      case 'vit': this.g.me.hp = m.hp; this.shield = m.sh; return;
+      case 'vit': {
+        const dHp = m.hp - this.g.me.hp, dSh = m.sh - this.shield;
+        this.g.me.hp = m.hp; this.shield = this.g.me.armor = m.sh; // me.armor is the HUD's SHIELD number
+        if (m.rally) { this.rallyUntil = this.g.now + 0.6; this.rallyTick(dHp, dSh); }
+        return;
+      }
+      case 'boost': this.adrenUntil = this.g.now + m.ms / 1000; this.adrenPulseAt = this.g.now; this.g.sound.play('inject', { vol: 0.6 }); return;
       case 'buffs':
         for (const k of ['damage', 'rate', 'barrier']) this.buffs[k] = this.g.now + (m[k] || 0) / 1000;
         if (m.damage || m.rate || m.barrier) this.g.sound.play('win', { vol: 0.4, rate: 1.4 });
         return;
+      case 'teamups': this.teamUps = m.ups; if (this.g.ui === 'buy') this.renderBuy(); return;
+      case 'coreups': this.coreLevel = m.level; this.coreUps = m.ups; if (this.g.ui === 'buy') this.renderBuy(); return;
     }
   }
 
@@ -216,14 +255,16 @@ export class Holdout {
 
   onInv(m) {
     Object.assign(this, { mats: m.mats || this.mats, ammo: m.ammo || this.ammo, shield: m.shield || 0 });
-    if (m.inv) {
-      this.inv = m.inv;
+    if (m.inv) this.inv = m.inv;
+    if (m.sack) this.sack = m.sack;
+    if (m.inv || m.sack) {
       this.items = {};
-      for (const it of m.inv) if (it && it.kind !== 'gun' && it.kind !== 'armor') this.items[it.id] = (this.items[it.id] || 0) + (it.n ?? 1);
+      for (const it of [...this.inv, ...this.sack]) if (it && it.kind !== 'gun' && it.kind !== 'armor') this.items[it.id] = (this.items[it.id] || 0) + (it.n ?? 1);
     }
     if (m.gear) { this.armor = m.gear; this.as = armorStats(this.armor); }
     if (m.maxHp) this.maxHp = m.maxHp;
     if (m.cls !== undefined) this.cls = m.cls;
+    if (m.buyback !== undefined) this.buyback = m.buyback;
     this.g.weapons.pool = this.ammo;
     const was = this.downed;
     this.downed = !!m.downed && m.alive;
@@ -233,6 +274,8 @@ export class Holdout {
     this.activeThrow ??= THROWABLES.find(id => this.items[id] > 0) ?? null;
     if (this.g.ui === 'bag') this.renderBag();
     if (this.g.ui === 'smith') this.renderSmith();
+    if (this.g.ui === 'bank') this.renderBank();
+    if (this.g.ui === 'buy') this.renderBuy();
   }
 
   // weapons.js view of the hotbar: guns by weapon id, anything else held as 'hold_item'
@@ -259,13 +302,14 @@ export class Holdout {
     if (!it || it.kind === 'gun') return false;
     if (it.kind === 'throw') { this.activeThrow = it.id; this.throwItem(); }
     else if (it.kind === 'heal' || it.kind === 'shield') this.heal(it.id);
+    else if (it.kind === 'adrenaline') this.useAdrenaline();
     else if (it.kind === 'trap' || it.kind === 'deploy') { this.build.pick[it.kind] = it.id; this.build.select(it.kind); }
     else if (it.kind === 'armor') this.g.net.send({ t: 'move', from: 'i' + (this.g.weapons.slot - 1), to: 'a:' + ARMOR[it.id].slot });
-    else if (it.kind === 'attach') this.say('Open your inventory (I) and drop it on a gun to fit it');
+    else if (it.kind === 'attach') this.say('Open your inventory (E or I) and drop it on a gun to fit it');
     return true;
   }
 
-  hasFlashlight() { const it = this.heldItem(); return it?.kind === 'gun' && it.att?.rail === 'flashlight'; }
+  hasFlashlight() { const it = this.heldItem(); return it?.kind === 'gun' && it.att?.light === 'flashlight'; }
 
   nextThrow() {
     const owned = THROWABLES.filter(id => this.items[id] > 0);
@@ -319,22 +363,35 @@ export class Holdout {
   // A fresh world arrives (joining, or the next match after one ended): nothing from before may linger.
   resetMatch() {
     this.ents.clearAll();
+    this.ents.bankerShow(); // the Banker is always present, including the lobby
     this.zombies.clear();
     this.clearGlobs();
     this.world.clearDecals();
     this.world.setNight(0);
     this.nightK = 0;
     this.flashOn = false;
+    this.flashOffThisNight = false;
+    this.nvUp = false;
+    this.nvManualOn = false;
+    this.nvWasActive = false;
+    this.shadeStingAt = 0;
+    this.nvK = 0;
+    this.applyNV();
     this.build.toggle(false);
     this.edit.stop();
     Object.assign(this, {
       pfx: null, task: null, buffs: {}, alertUntil: 0, downed: false, carrying: null, using: null, hold: null, holdLock: false,
-      reviveId: null, coreHealer: null, shake: 0, respawnAt: 0, spectate: null, it: null,
+      reviveId: null, coreHealer: null, shake: 0, respawnAt: 0, spectate: null, it: null, buyback: null, bankSel: null,
+      teamUps: { vitality: 0, firepower: 0, engineering: 0, gunnery: 0 },
+      coreLevel: 0, coreUps: Object.fromEntries(CORE_UP_IDS.map(id => [id, 0])),
+      adrenUntil: 0, adrenPulseAt: 0, rallyUntil: 0, rallyK: 0,
     });
     if (this.g.ui === 'bag') this.closeBag();
     if (this.g.ui === 'smith') this.closeSmith();
+    if (this.g.ui === 'bank') this.closeBank();
     this.minimap.reset();
     this.smithOn = false;
+    $('skyBackMark').hidden = true;
     $('deathCam').hidden = true;
     $('hoFeed').innerHTML = '';
     $('killfeed').innerHTML = '';
@@ -415,8 +472,7 @@ export class Holdout {
     if (d > 30) return;
     const pos = [zb.pos[0], zb.pos[1] + 1.5 * zb.s, zb.pos[2]];
     if (kind === 'wind') {
-      if (zb.type === 'swooper') this.g.sound.play('sky_roar', { pos, vol: 0.9, ref: 5, rate: 2.2 }); // screech before the dive
-      else if ((zb.type === 'brute' || zb.type === 'alpha') && Math.random() < 0.5) this.g.sound.play('brute_roar', { pos, vol: 1.2, ref: 4, rate: zb.type === 'alpha' ? 0.8 : 1 });
+      if ((zb.type === 'brute' || zb.type === 'alpha') && Math.random() < 0.5) this.g.sound.play('brute_roar', { pos, vol: 1.2, ref: 4, rate: zb.type === 'alpha' ? 0.8 : 1 });
       else this.g.sound.play('z_swipe', { pos, vol: 0.9, ref: 2.5, rate: 0.9 + Math.random() * 0.25 });
     }
   }
@@ -433,6 +489,22 @@ export class Holdout {
   }
 
   alert(text, secs = 3) { this.alertText = text; this.alertUntil = this.g.now + secs; }
+
+  // Rally Fire feedback: a floating "+HP" / "+SHIELD" tick beside the vitals boxes.
+  rallyTick(dHp, dSh) {
+    if (dHp > 0) this.floatTick('hp', `+${Math.round(dHp)}`);
+    if (dSh > 0) this.floatTick('armor', `+${Math.round(dSh)}`);
+  }
+
+  floatTick(vitalId, text) {
+    const el = $(vitalId)?.closest('.vital');
+    if (!el) return;
+    const d = document.createElement('div');
+    d.className = 'vitalTick';
+    d.textContent = text;
+    el.append(d);
+    setTimeout(() => d.remove(), 900);
+  }
 
   onDown(m) {
     if (m.id === this.g.me.id) {
@@ -574,7 +646,8 @@ export class Holdout {
     if (m.ev === 'titanwarn') { hud.banner('THE BROOD TITAN', 'It is coming — its riders can\'t be hurt until they jump off', 'lose', 5000); this.g.sound.play('wave_horn', { vol: 1, rate: 0.6 }); }
     else if (m.ev === 'titan') { this.g.sound.play('sky_roar', { vol: 1.2, rate: 0.6 }); this.task = { text: 'BROOD TITAN: shoot the glowing egg sac on its back (double damage) · its riders fall when it dies', until: this.g.now + 20 }; }
     else if (m.ev === 'leap') { const z = this.zombies.list.get(m.id); if (z) this.g.sound.play('brute_roar', { pos: z.pos, vol: 0.8, ref: 5, rate: 1.4 }); }
-    else if (m.ev === 'titandie') { hud.banner('BROOD TITAN DOWN', 'The Blacksmith has arrived at the Core', 'win', 5000); this.g.sound.play('win', { vol: 0.6 }); }
+    else if (m.ev === 'mdrop') this.ents.mdropFx(m.p);
+    else if (m.ev === 'titandie') { hud.banner('BROOD TITAN DOWN', 'It dropped the Brood Launcher!', 'win', 5000); this.g.sound.play('win', { vol: 0.6 }); }
   }
 
   onMaw(m) {
@@ -622,7 +695,7 @@ export class Holdout {
     if (act === 'ready') { this.toggleReady(); return true; }
     if (act === 'backpack') { this.openBag(false); return true; }
     if (act === 'map') { this.minimap.toggle(true); return true; }
-    const needsBody = ['build', 'edit', 'demolish', 'interact', 'throw', 'nextThrow', 'heal', 'dropgun', 'slot4', 'slot5', 'slot6'];
+    const needsBody = ['build', 'edit', 'demolish', 'interact', 'throw', 'nextThrow', 'heal', 'slot4', 'slot5', 'slot6', 'adrenaline', 'sack1', 'sack2', 'sack3', 'sack4'];
     if (!pl.alive && act === 'fire') { this.cycleSpectate(); return true; }
     if (!pl.alive || this.downed) return needsBody.includes(act) || (this.downed && ['primary', 'secondary', 'knife', 'lastWeapon', 'prevWeapon', 'nextWeapon', 'reload', 'inspect', 'alt', 'jump'].includes(act));
     if (act === 'interact') return this.pressInteract();
@@ -631,12 +704,19 @@ export class Holdout {
     if (act === 'throw') { this.throwItem(); return true; }
     if (act === 'nextThrow') { this.nextThrow(); return true; }
     if (act === 'flashlight') {
-      if (!this.hasFlashlight()) this.say('No flashlight on this gun — fit one at the Blacksmith, or find one on a night wave');
-      else { this.flashOn = !this.flashOn; this.g.sound.play('tick', { vol: 0.5, rate: 1.4 }); }
+      // a flashlight on the held gun takes priority; otherwise L flips Night Vision Goggles up/down
+      if (this.hasFlashlight()) { this.flashOn = !this.flashOn; this.flashOffThisNight = !this.flashOn; this.g.sound.play('tick', { vol: 0.5, rate: 1.4 }); }
+      else if (this.armor.head?.id === 'nvg') {
+        this.nvUp = !this.nvUp;
+        this.nvManualOn = !this.nvUp; // flipping them down by hand also works in daylight during a wave
+        this.g.sound.play('tick', { vol: 0.5, rate: 1.4 });
+      }
+      else this.say('No flashlight on this gun — fit one at the Blacksmith, or find one on a night wave');
       return true;
     }
     if (act === 'heal') { this.heal(); return true; }
-    if (act === 'dropgun') { this.dropGun(); return true; }
+    if (act === 'adrenaline') { this.useAdrenaline(); return true; }
+    if (act === 'sack1' || act === 'sack2' || act === 'sack3' || act === 'sack4') { this.useSackSlot(+act.slice(4) - 1); return true; }
     if (act === 'demolish') { const p = b.aimedPiece(); if (p) g.net.send({ t: 'demolish', id: p.id }); return true; }
     if (e.active) {
       if (act === 'alt') { e.reset(); return true; }
@@ -661,7 +741,8 @@ export class Holdout {
     }
     const slot = { primary: 1, secondary: 2, knife: 3, slot4: 4, slot5: 5, slot6: 6, inspect: 0 }[act];
     if (this.using && slot !== undefined) this.using = null;
-    // hotbar: 1-6 (guns or items), F = harvesting knife
+    // hotbar: 1-6 (guns or items), F = harvesting knife (F again while holding it: inspect)
+    if (act === 'inspect' && W.slot === W.knifeSlot) { W.inspect(); return true; }
     if (slot !== undefined) { W.equip(slot); return true; }
     if (act === 'fire' && W.w.cat === 'item') return this.useHeld();
     return false;
@@ -722,9 +803,22 @@ export class Holdout {
     this.g.weapons.cancelReload();
   }
 
-  dropGun() {
-    const W = this.g.weapons, it = this.heldItem();
-    if (it) this.g.net.send({ t: 'drop', from: 'i' + (W.slot - 1), n: it.kind === 'gun' ? 1 : it.n, mag: it.kind === 'gun' ? W.clip?.mag ?? 0 : undefined });
+  // J (or a sack key on an adrenaline slot): instant, no use-channel.
+  useAdrenaline() {
+    if (!(this.items.adrenaline > 0)) return this.say('No adrenaline shots — buy one at the Core or find one on a zombie');
+    this.g.net.send({ t: 'use', item: 'adrenaline' });
+  }
+
+  // Use whatever sits in sack slot `idx` (0-3): heal/shield start the normal timed use, adrenaline is instant.
+  useSackSlot(idx) {
+    const it = this.sack[idx];
+    if (!it) return;
+    if (it.kind === 'adrenaline') { this.g.net.send({ t: 'use', item: 'adrenaline' }); return; }
+    if (it.kind === 'heal' || it.kind === 'shield') {
+      if (this.using) { this.using = null; return; }
+      this.using = { item: it.id, start: this.g.now, end: this.g.now + ITEMS[it.id].time };
+      this.g.weapons.cancelReload();
+    }
   }
 
   // What E would do right now (highest priority first).
@@ -743,8 +837,10 @@ export class Holdout {
     const pk = this.ents.nearestPickup(me, 2.3, p => p.kind === 'it' || p.kind === 'svsupply');
     if (pk) return { kind: 'pickup', id: pk.id, text: `E: pick up ${pickupName(pk)}${pk.ik === 'gun' && this.inv.every(Boolean) ? ' (swaps with what you hold)' : ''}`, press: true };
     if (this.smithOn && Math.hypot(SMITH.x - me[0], SMITH.z - me[2]) < SMITH.reach) return { kind: 'smith', text: 'E: talk to the Blacksmith (forge, infuse, attachments, turrets)', press: true };
+    if (this.nearBanker()) return { kind: 'bank', text: 'E — talk to the Banker', press: true };
     if (this.nearStash()) return { kind: 'stash', text: 'E: open the team chest', press: true };
     if (distToBox(pl.eye, OUTPOST.core.base) < 3.0 && this.core[0] < this.core[1]) {
+      if (this.phase === 'wave') return { kind: 'coreheal', text: 'The Core can only be repaired between waves' };
       const other = this.coreHealer && this.coreHealer !== g.me.id ? this.roster.find(p => p.id === this.coreHealer) : null;
       return { kind: 'coreheal', text: other ? `${other.name} is healing the Core (one at a time)` : 'Hold E to heal the Core', cont: !other };
     }
@@ -755,11 +851,13 @@ export class Holdout {
 
   pressInteract() {
     const it = this.interactTarget(), g = this.g;
-    if (!it?.press) return false;
+    if (!it) { this.openBag(false); return true; } // nothing to use/pick up/revive/repair here — open the inventory instead
+    if (!it.press) return false;
     if (it.kind === 'pickup') g.net.send({ t: 'pickup', id: it.id, slot: Math.max(0, g.weapons.slot - 1) });
     else if (it.kind === 'putdown') g.net.send({ t: 'carry' });
     else if (it.kind === 'stash') this.openBag(true);
     else if (it.kind === 'smith') this.openSmith();
+    else if (it.kind === 'bank') this.openBank();
     return true;
   }
 
@@ -848,6 +946,42 @@ export class Holdout {
     if (this.g.vcur) this.g.setVCursor(...this.g.vcur);
   }
 
+  // ---------- the Banker panel (sell gear, buy back the last sale) ----------
+  openBank() {
+    const g = this.g;
+    if (g.ui || !g.player.alive) return;
+    g.ui = 'bank';
+    this.bankSel = null;
+    $('bankMenu').hidden = false;
+    this.renderBank();
+    if (g.input.locked) g.setVCursor(innerWidth / 2, innerHeight / 2);
+  }
+
+  closeBank() {
+    const g = this.g;
+    if (g.ui !== 'bank') return;
+    g.ui = null;
+    $('bankMenu').hidden = true;
+    g.setVCursor(null);
+  }
+
+  renderBank() {
+    $('bankMoney').textContent = `$${this.g.me.money}`;
+    $('bankGrid').innerHTML = bankHTML(this);
+    for (const b of $('bankGrid').querySelectorAll('button, .slot')) {
+      b.onclick = e => {
+        const d = b.dataset;
+        if (d.sell) { this.g.net.send({ t: 'sell', uid: +d.sell }); this.bankSel = null; this.g.sound.play('buy', { vol: 0.5 }); return; }
+        if (d.buyback) { this.g.net.send({ t: 'buyback' }); this.g.sound.play('buy', { vol: 0.5 }); return; }
+        if (d.ref && d.ref !== 'bb') {
+          if (e.shiftKey && d.uid) { this.g.net.send({ t: 'sell', uid: +d.uid }); this.bankSel = null; this.g.sound.play('buy', { vol: 0.5 }); return; }
+          this.bankSel = d.ref; this.renderBank(); this.g.sound.play('tick', { vol: 0.3 });
+        }
+      };
+    }
+    if (this.g.vcur) this.g.setVCursor(...this.g.vcur);
+  }
+
   renderBuy() {
     const g = this.g;
     $('buyMoney').textContent = `$${g.me.money}`;
@@ -855,17 +989,25 @@ export class Holdout {
     $('buyGrid').innerHTML = buyHTML(this);
     for (const b of $('buyGrid').querySelectorAll('button')) {
       b.onclick = () => {
-        if (b.dataset.bank) { this.payBank = !this.payBank; this.renderBuy(); return; }
-        if (b.dataset.cls) { g.net.send({ t: 'class', id: b.dataset.cls }); return; }
-        g.net.send({ t: 'buy', item: b.dataset.id, bank: this.payBank, slot: Math.max(0, g.weapons.slot - 1), el: b.dataset.el });
+        const d = b.dataset;
+        if (d.bank) { this.payBank = !this.payBank; this.renderBuy(); return; }
+        if (d.tab) { this.shopTab = d.tab; this.renderBuy(); return; }
+        if (d.cls) { g.net.send({ t: 'class', id: d.cls }); return; }
+        if (d.rarity) { g.net.send({ t: 'rarity', uid: +d.rarity, bank: this.payBank }); return; }
+        if (d.tierup) { g.net.send({ t: 'tierup', uid: +d.tierup }); return; }
+        if (d.teamup) { g.net.send({ t: 'teamup', id: d.teamup, bank: this.payBank }); return; }
+        if (d.coreup) { g.net.send({ t: 'coreup', id: d.coreup, bank: this.payBank }); return; }
+        g.net.send({ t: 'buy', item: d.id, bank: this.payBank, slot: Math.max(0, g.weapons.slot - 1), el: d.el });
       };
     }
+    if (this.g.vcur) this.g.setVCursor(...this.g.vcur);
   }
 
   // ---------- per frame ----------
   update(dt) {
     const g = this.g, now = g.now, pnow = performance.now() / 1000;
-    this.zombies.update(dt, pnow);
+    this.zombies.update(dt, pnow, { pos: g.player.pos, nightK: this.nightK, nvK: this.nvK });
+    this.updateShades(now);
     const people = [g.player.pos, ...[...g.remotes.values()].map(r => r.pos), ...[...this.ents.survivors.values()].map(s => s.pos)];
     this.structs.tick(dt, people);
     this.nodes.update(dt);
@@ -876,6 +1018,9 @@ export class Holdout {
     const fx = this.pfx, blind = fx && now < fx.blindUntil ? Math.min(1, (fx.blindUntil - now) / 1.2) : 0, burn = fx && now < fx.burnUntil ? 0.55 + 0.25 * Math.sin(now * 12) : 0;
     setStyle('fxBlind', 'opacity', blind.toFixed(2));
     setStyle('fxBurn', 'opacity', burn.toFixed(2));
+    const adrenPulse = Math.max(0, 1 - (now - this.adrenPulseAt) / 0.6);
+    setStyle('fxAdren', 'opacity', (adrenPulse * 0.5).toFixed(2));
+    setStyle('fxRally', 'opacity', (this.rallyK * 0.5).toFixed(2));
     const firing = g.held('fire') && g.input.locked && !g.ui;
     if (g.ui === 'bag') this.invUI.tick(g.vcur, g.input.down('Mouse0'));
     this.build.update(dt, firing);
@@ -887,16 +1032,58 @@ export class Holdout {
     }
     this.dusk += ((this.phase === 'wave' ? 1 : 0) - this.dusk) * Math.min(1, dt * 0.7);
     this.world.setDusk(Math.round(this.dusk * 50) / 50);
+    const wasNight = this.nightK > 0.3;
     this.nightK += ((this.phase === 'wave' && this.night ? 1 : 0) - this.nightK) * Math.min(1, dt * 0.5);
     this.world.setNight(Math.round(this.nightK * 50) / 50);
+    const isNight = this.nightK > 0.3;
+    if (!wasNight && isNight) this.flashOffThisNight = false; // a new night: flashlights come on by themselves again
+    // in the dark a flashlight gun lights up when you pull it out, unless you switched it off this night
+    if (isNight && !this.flashOn && !this.flashOffThisNight && this.hasFlashlight()) this.flashOn = true;
     if (this.flashOn && !this.hasFlashlight()) this.flashOn = false;
     this.nightFx.update(dt, this.nightK, this.flashOn && g.player.alive, g.remotes);
+    // auto-on stays night-only; flipping the goggles down by hand (nvManualOn) also works in daylight during a wave
+    const nvActive = !!(this.armor.head?.id === 'nvg' && !this.nvUp && g.player.alive && (isNight || (this.nvManualOn && this.dusk > 0.5)));
+    if (nvActive !== this.nvWasActive) { this.g.sound.play(nvActive ? 'nv_on' : 'nv_off', { vol: 0.6 }); this.nvWasActive = nvActive; }
+    this.nvK += ((nvActive ? 1 : 0) - this.nvK) * Math.min(1, dt * 3);
+    this.applyNV();
+    this.rallyK += ((now < this.rallyUntil ? 1 : 0) - this.rallyK) * Math.min(1, dt * 5);
     if (this.shadowDirty && now - this.shadowAt > 0.5) { this.world.refreshShadows(); this.shadowDirty = false; this.shadowAt = now; }
     if (now > this.groanAt) this.groan(now);
     if (this.shake > 0) { // explosion camera shake
       const c = g.world.camera, s = this.shake * 0.05;
       c.position.x += (Math.random() - 0.5) * s; c.position.y += (Math.random() - 0.5) * s;
       this.shake = Math.max(0, this.shake - dt * 2.5);
+    }
+  }
+
+  // Canvas filter + #fxNV overlay + world lighting boost, driven by the eased nvK factor.
+  applyNV() {
+    const k = this.nvK;
+    this.world.setNV(k);
+    setStyle('fxNV', 'opacity', k.toFixed(2));
+    $('game').style.filter = k > 0.004
+      ? `brightness(${(1 + k * 0.7).toFixed(2)}) contrast(${(1 + k * 0.3).toFixed(2)}) grayscale(${k.toFixed(2)}) sepia(${k.toFixed(2)}) hue-rotate(${(80 * k).toFixed(0)}deg) saturate(${(1 + k * 5).toFixed(2)})`
+      : '';
+    if (k > 0.01) setStyle('fxNVGrain', 'backgroundPosition', `${(Math.random() * 150) | 0}px ${(Math.random() * 150) | 0}px`);
+  }
+
+  // Shade audio cues: a one-shot sting the first time you spot one on screen (global cooldown), then a
+  // breathy positional whisper every few seconds for as long as it stays visible.
+  updateShades(now) {
+    const cam = this.g.world.camera;
+    for (const zb of this.zombies.list.values()) {
+      if (zb.type !== 'shade') continue;
+      const seen = (zb.vis ?? 0) > 0.5;
+      if (seen && !zb.wasSeen && !zb.stung && now > this.shadeStingAt) {
+        _v.set(zb.pos[0], zb.pos[1] + 1.5 * zb.s, zb.pos[2]).project(cam);
+        if (_v.z < 1 && Math.abs(_v.x) < 1.05 && Math.abs(_v.y) < 1.05) {
+          this.g.sound.play('shade_sting', { vol: 0.7 });
+          zb.stung = true;
+          this.shadeStingAt = now + 10;
+        }
+      }
+      if (seen && now > (zb.whisperAt || 0)) { this.g.sound.play('shade_whisper', { pos: zb.pos, vol: 0.55, ref: 4 }); zb.whisperAt = now + 3 + Math.random() * 2; }
+      zb.wasSeen = seen;
     }
   }
 
@@ -975,12 +1162,28 @@ export class Holdout {
     setText('matStone', this.mats.stone);
     setText('matMetal', this.mats.metal);
     setHTML('hotbar', hotbarHTML(this));
+    const flash = this.hasFlashlight();
+    setHidden('hoFlash', !flash);
+    if (flash) { setText('hoFlash', `FLASHLIGHT ${this.flashOn ? 'ON' : 'OFF'} · L`); setClass('hoFlash', 'on', this.flashOn); }
+    const nvg = this.armor.head?.id === 'nvg';
+    setHidden('hoNV', !nvg);
+    if (nvg) {
+      const label = this.nvK > 0.5 ? 'NIGHT VISION ON · L' : this.nvUp ? 'NIGHT VISION UP · L' : 'NIGHT VISION (switches on at night) · L';
+      setText('hoNV', label);
+      setClass('hoNV', 'on', this.nvK > 0.5);
+    }
+    setClass('vitals', 'rally', this.rallyK > 0.15);
     this.drawCompass();
+    this.drawSkyBackMark();
     setHTML('team', this.roster.map(p => {
       const state = !p.alive ? '☠' : p.downed ? '✚ DOWN' : ph === 'lobby' || ph === 'intermission' || ph === 'prep' ? (p.ready ? '✔ READY' : '…') : `${p.hp}${p.shield ? ` +${p.shield}` : ''}`;
       const badge = p.cls ? `<i class="cls ${p.cls}">${CLASSES[p.cls].name[0]}</i>` : '';
-      return `<div class="tm${p.id === g.me.id ? ' me' : ''}${p.downed ? ' down' : ''}${p.alive ? '' : ' dead'}"><span class="n">${badge}${esc(p.name)}${p.host ? ' ★' : ''}${p.carrying ? ' ⛑' : ''}</span><span class="s">${state}</span><i style="width:${p.alive && !p.downed ? (p.hp / (p.maxHp || 100)) * 100 : 0}%"></i><u style="width:${p.alive ? p.shield || 0 : 0}%"></u></div>`;
-    }).join('') + [...this.ents.survivors.values()].map(s => `<div class="tm sv"><span class="n">${esc(s.name)} <small>${SURVIVOR.tiers[s.tier]?.name ?? 'survivor'}</small></span><span class="s">${['wounded', 'carried', `${Math.round(s.hp * 100)}% · ${s.ammo} ammo`][s.state]}</span><i style="width:${s.hp * 100}%"></i></div>`).join(''));
+      return `<div class="tm${p.id === g.me.id ? ' me' : ''}${p.downed ? ' down' : ''}${p.alive ? '' : ' dead'}"><span class="n">${badge}${esc(p.name)}${p.host ? ' ★' : ''}${p.carrying ? ' ⛑' : ''}</span><span class="s">${state}</span><i style="width:${p.alive && !p.downed ? (p.hp / (p.maxHp || 200)) * 100 : 0}%"></i><u style="width:${p.alive ? p.shield || 0 : 0}%"></u></div>`;
+    }).join('') + [...this.ents.survivors.values()].map(s => {
+      const cls = SURVIVOR_CLASSES[s.cls];
+      const clsTxt = cls ? ` <small style="color:${hex(cls.color)}">${cls.name}</small>` : '';
+      return `<div class="tm sv"><span class="n">${esc(s.name)}${clsTxt} <small>${SURVIVOR.tiers[s.tier]?.name ?? 'survivor'}</small></span><span class="s">${['wounded', 'carried', `${Math.round(s.hp * 100)}% · ${s.ammo} ammo`][s.state]}</span><i style="width:${s.hp * 100}%"></i></div>`;
+    }).join(''));
     // boss bar
     const k = this.ents.sky, mw = this.ents.maw, titan = [...this.zombies.list.values()].find(z => z.type === 'titan' && !z.dead);
     setHidden('hoBoss', !((k && !k.dead) || mw || titan));
@@ -998,6 +1201,7 @@ export class Holdout {
     }
     // buffs + task
     const chips = [['damage', 'DAMAGE +30%'], ['rate', 'RAPID FIRE'], ['barrier', 'CORE BARRIER']].filter(([key]) => now < (this.buffs[key] || 0)).map(([key, label]) => `<span>${label} ${Math.ceil(this.buffs[key] - now)}s</span>`);
+    if (now < this.adrenUntil) chips.push(`<span class="adren">ADRENALINE ${Math.ceil(this.adrenUntil - now)}s</span>`);
     setHTML('hoBuffs', chips.join(''));
     setHidden('hoTask', !(this.task && now < this.task.until));
     if (this.task) setText('hoTask', this.task.text);
@@ -1054,6 +1258,7 @@ export class Holdout {
     for (const d of this.ents.drops.values()) put(bearing(pl.pos, d.x, d.z), 'drop', '✦');
     for (const p of this.minimap.pings) put(bearing(pl.pos, p.x, p.z), 'ping', '◆');
     for (const s of this.ents.survivors.values()) if (s.state === 0) put(bearing(pl.pos, s.pos[0], s.pos[2]), 'svm', '✚');
+    for (const zb of this.zombies.list.values()) if (!zb.dead && zb.type === 'seeker') put(bearing(pl.pos, zb.pos[0], zb.pos[2]), 'seeker', '▲');
     for (const p of this.roster) {
       const r = p.id !== this.g.me.id && this.g.remotes.get(p.id);
       if (r) put(bearing(pl.pos, r.pos[0], r.pos[2]), p.downed ? 'mate down' : 'mate', '●');
@@ -1061,10 +1266,35 @@ export class Holdout {
     setHTML('compassTicks', marks.join(''));
   }
 
+  // Colossus back weak-point reminder: a ring around it on screen, or an arrow clamped to the screen edge
+  // pointing toward it when it's off-screen (or behind you).
+  drawSkyBackMark() {
+    const s = this.ents.sky, i = s?.backIdx ?? -1, p = i >= 0 ? s.points[i] : null;
+    if (!s || s.dead || i < 0 || !p || !p.visible) { setHidden('skyBackMark', true); return; }
+    const cam = this.g.world.camera;
+    p.getWorldPosition(_v);
+    _v.project(cam);
+    const behind = _v.z > 1, cx = innerWidth / 2, cy = innerHeight / 2;
+    let x = cx + _v.x * cx, y = cy - _v.y * cy;
+    if (behind) { x = 2 * cx - x; y = 2 * cy - y; }
+    const onScreen = !behind && _v.x >= -1 && _v.x <= 1 && _v.y >= -1 && _v.y <= 1;
+    const el = $('skyBackMark');
+    el.hidden = false;
+    if (onScreen) {
+      el.className = 'ring';
+      el.style.transform = `translate(${x.toFixed(0)}px, ${y.toFixed(0)}px)`;
+    } else {
+      const dx = x - cx, dy = y - cy, pad = 42;
+      const k = Math.min((innerWidth / 2 - pad) / Math.max(1, Math.abs(dx)), (innerHeight / 2 - pad) / Math.max(1, Math.abs(dy)));
+      el.className = 'arrow';
+      el.style.transform = `translate(${(cx + dx * k).toFixed(0)}px, ${(cy + dy * k).toFixed(0)}px) rotate(${Math.atan2(dy, dx).toFixed(3)}rad)`;
+    }
+  }
+
   // Name tags over teammates and survivors.
   updateTags() {
     const cam = this.g.world.camera, root = $('tags'), seen = new Set();
-    const show = (key, pos, text, cls) => {
+    const show = (key, pos, text, cls, color = '') => {
       seen.add(key);
       let el = this.tags.get(key);
       if (!el) { el = document.createElement('div'); root.append(el); this.tags.set(key, el); }
@@ -1074,6 +1304,7 @@ export class Holdout {
       if (!vis) return;
       el.className = cls;
       if (el.textContent !== text) el.textContent = text;
+      el.style.color = color;
       el.style.transform = `translate(${((_v.x + 1) / 2) * innerWidth}px, ${((1 - _v.y) / 2) * innerHeight}px) translate(-50%, -100%)`;
     };
     for (const p of this.roster) {
@@ -1082,8 +1313,15 @@ export class Holdout {
     }
     for (const s of this.ents.survivors.values()) {
       if (s.state === 1) continue;
-      const tier = SURVIVOR.tiers[s.tier]?.name ?? '';
-      show('sv' + s.id, [s.pos[0], s.pos[1] + (s.state === 0 ? 0.9 : 2.15), s.pos[2]], s.state === 0 ? `✚ ${s.name} · ${tier} (wounded)` : `${s.name} · ${tier} ${Math.round(s.hp * 100)}%`, s.state === 0 ? 'tag sv down' : 'tag sv');
+      const tier = SURVIVOR.tiers[s.tier]?.name ?? '', cls = SURVIVOR_CLASSES[s.cls];
+      const label = cls ? `${cls.name} ${tier}` : tier;
+      show('sv' + s.id, [s.pos[0], s.pos[1] + (s.state === 0 ? 0.9 : 2.15), s.pos[2]], s.state === 0 ? `✚ ${s.name} · ${label} (wounded)` : `${s.name} · ${label} ${Math.round(s.hp * 100)}%`, s.state === 0 ? 'tag sv down' : 'tag sv', cls ? hex(cls.color) : '');
+    }
+    const me = this.g.player.pos;
+    for (const zb of this.zombies.list.values()) {
+      if (zb.dead) continue;
+      if (zb.type === 'golem' && Math.hypot(zb.pos[0] - me[0], zb.pos[2] - me[2]) < 40) show('zg' + zb.id, [zb.pos[0], zb.pos[1] + 2.7 * zb.s, zb.pos[2]], 'WALL BREAKER', 'tag breaker');
+      else if (zb.type === 'seeker' && Math.hypot(zb.pos[0] - me[0], zb.pos[2] - me[2]) < 45) show('zs' + zb.id, [zb.pos[0], zb.pos[1] + 2.2 * zb.s, zb.pos[2]], '!', 'tag seeker');
     }
     for (const [id, el] of this.tags) if (!seen.has(id)) { el.remove(); this.tags.delete(id); }
   }
@@ -1091,6 +1329,7 @@ export class Holdout {
   dispose() {
     this.closeBag();
     this.closeSmith();
+    this.closeBank();
     this.zombies.dispose();
     this.structs.dispose();
     this.props.dispose();
@@ -1107,10 +1346,14 @@ export class Holdout {
     for (const el of this.tags.values()) el.remove();
     this.world.setDusk(0);
     this.world.setNight(0);
+    this.world.setNV(0);
+    this.nvK = 0;
+    $('game').style.filter = '';
+    setStyle('fxNV', 'opacity', '0');
     this.nightFx.dispose();
     this.world.setLanes({});
     $('hud').classList.remove('coop', 'downed');
-    for (const id of ['hoTop', 'compass', 'team', 'mats', 'buildBar', 'revive', 'hoAlert', 'hoEnd', 'hotbar', 'hoBoss', 'hoTask', 'bagMenu', 'smithMenu', 'minimap', 'mapWrap']) $(id).hidden = true;
+    for (const id of ['hoTop', 'compass', 'team', 'mats', 'buildBar', 'revive', 'hoAlert', 'hoEnd', 'hotbar', 'hoBoss', 'hoTask', 'hoFlash', 'hoNV', 'bagMenu', 'smithMenu', 'bankMenu', 'minimap', 'mapWrap', 'skyBackMark']) $(id).hidden = true;
     $('hoFeed').innerHTML = '';
     $('hoBuffs').innerHTML = '';
     if (this.sbHead) $('scoreboard').querySelector('thead').innerHTML = this.sbHead;

@@ -10,18 +10,14 @@ $('nameInput').value = game.hud.settings.name || '';
 const hash = location.hash.slice(1).toUpperCase();
 if (/^[A-Z]{4}$/.test(hash)) $('codeInput').value = hash;
 
-$('btnQuick').onclick = () => game.start('quick');
-$('btnHuntsman').onclick = () => game.start('create', { gameMode: 'scoutsman' });
-$('btnHoldout').onclick = () => game.start('create', { gameMode: 'zombies' });
+$('btnPlay').onclick = () => game.start('create');
 $('hoBest').textContent = recordText();
-$('btnCreate').onclick = () => game.start('create');
 $('btnJoin').onclick = () => {
   const code = $('codeInput').value.trim().toUpperCase();
   if (!/^[A-Z]{4}$/.test(code)) { $('menuMsg').textContent = 'Enter the 4-letter room code'; return; }
   game.start('join', { code });
 };
 $('codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnJoin').click(); });
-$('btnBot').onclick = () => game.start('bot', { diff: $('diffSelect').value });
 $('btnResume').onclick = () => game.resume();
 $('btnLeave').onclick = () => game.leave();
 $('game').addEventListener('click', () => { if (game.inGame && !game.ui && !game.input.locked) game.resume(); });

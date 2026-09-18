@@ -2,18 +2,28 @@
 // and turrets, thrown grenades / molotov fires / freeze blasts, rockets, survivors and the Colossus.
 // All of it is driven by server messages; this file only draws and animates.
 import * as THREE from 'three';
-import { RARITY, AMMO, ITEMS, SURVIVOR } from '/shared/holdout.js';
+import { RARITY, AMMO, ITEMS, SURVIVOR_CLASSES, survivorGun } from '/shared/holdout.js';
 import { ELEMENTS } from '/shared/elements.js';
-import { TIER_COLORS } from '/shared/items.js';
+import { TIER_COLORS, itemName } from '/shared/items.js';
+import { OUTPOST } from '/shared/outpost.js';
 import { SKY, SKY_POINTS, SKY_LEAN, skyTransform, skyPoint } from '/shared/skyboss.js';
 import { hitboxes } from '/shared/physics.js';
 import { PlayerModel } from './models.js';
+import { gunIconKind } from './icons.js';
 
 const G_THROW = 15, G_GLOB = 12;
-const ITEM_COLOR = { grenade: 0x3f6b35, molotov: 0xe07a2e, freeze: 0x7fe9ff, bandage: 0xf2efe6, medkit: 0xe23c4a, shield_s: 0x5fb8ff, shield: 0x3d7dff, spikes: 0x8c9096, darts: 0x8c9096, flame: 0xd65a2a, turret: 0x6a7480, rturret: 0x6a7480, campfire: 0xc9772e };
+const ITEM_COLOR = {
+  grenade: 0x3f6b35, molotov: 0xe07a2e, freeze: 0x7fe9ff, bandage: 0xf2efe6, medkit: 0xe23c4a, shield_s: 0x5fb8ff, shield: 0x3d7dff, adrenaline: 0xff5a3c,
+  spikes: 0x8c9096, darts: 0x8c9096, flame: 0xd65a2a, turret: 0x6a7480, rturret: 0x6a7480, campfire: 0xc9772e,
+  gturret: 0x767b80, frturret: 0x8fd6e8, flturret: 0x8a2f1c, tesla: 0x9d8bf0, mortar: 0x3c4034,
+};
 const MAT_COLOR = { wood: 0xc9955a, stone: 0xa9a49b, metal: 0x8d9aa6 };
 const lerp = (a, b, t) => a + (b - a) * t;
 const _v = new THREE.Vector3();
+const PICKUP_BLINK = 20; // seconds before despawn that a ground item starts blinking
+const PICKUP_LABEL_R = 10; // meters: how close you need to be to see a dropped gun's floating name
+// how far forward (local -z) each gun silhouette's muzzle sits, for the small elemental-ammo marker
+const GUN_FRONT = { pistol: -0.22, smg: -0.42, rifle: -0.7, shotgun: -0.5, sniper: -0.8, launcher: -0.5, minigun: -0.6, shockwave: -0.35, melee: -0.5 };
 
 function glowTexture() {
   const cv = document.createElement('canvas');
@@ -22,6 +32,44 @@ function glowTexture() {
   g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.4, 'rgba(255,255,255,0.45)'); g.addColorStop(1, 'rgba(255,255,255,0)');
   c.fillStyle = g; c.fillRect(0, 0, 64, 64);
   return new THREE.CanvasTexture(cv);
+}
+
+// the Banker's floating "$" sign
+function dollarTexture() {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 128;
+  const c = cv.getContext('2d');
+  c.fillStyle = '#ffd65a';
+  c.font = '900 100px sans-serif';
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  c.shadowColor = '#ffb43c';
+  c.shadowBlur = 16;
+  c.fillText('$', 64, 70);
+  return new THREE.CanvasTexture(cv);
+}
+
+// Floating name label above a dropped gun: one shared SpriteMaterial per (text, color) pair — the rarity/
+// tier/element combos repeat a lot, so this stays a small, never-disposed cache instead of one texture per pickup.
+const labelCache = new Map();
+function gunLabel(text, color) {
+  const key = text + '|' + color;
+  let e = labelCache.get(key);
+  if (!e) {
+    const cv = document.createElement('canvas'), c = cv.getContext('2d');
+    c.font = '700 40px Rajdhani, sans-serif';
+    const w = Math.ceil(c.measureText(text).width) + 28;
+    cv.width = w; cv.height = 54;
+    c.font = '700 40px Rajdhani, sans-serif';
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.shadowColor = 'rgba(0,0,0,0.85)'; c.shadowBlur = 8;
+    c.fillStyle = color;
+    c.fillText(text, w / 2, 27);
+    const tex = new THREE.CanvasTexture(cv);
+    e = { mat: new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }), ar: w / 54 };
+    labelCache.set(key, e);
+  }
+  return e;
 }
 
 export class Entities {
@@ -37,6 +85,7 @@ export class Entities {
     this.cyl = new THREE.CylinderGeometry(1, 1, 1, 12);
     this.ring = new THREE.RingGeometry(0.45, 0.62, 24).rotateX(-Math.PI / 2);
     this.mats = new Map();
+    this.dollarTex = dollarTexture();
     this.pickups = new Map();
     this.chests = new Map();
     this.drops = new Map();
@@ -48,6 +97,43 @@ export class Entities {
     this.survivors = new Map();
     this.sky = null;
     this.t = 0;
+    this.buildCoreCannon();
+  }
+
+  // ---------- the Core cannon: a fixed turret on the Core's roof, upgraded but never destroyed ----------
+  buildCoreCannon() {
+    const g = new THREE.Group();
+    g.position.set(0, 2.2, 0);
+    this.mesh(this.cyl, 0x3d4750, g, [0, 0.32, 0], [0.6, 0.64, 0.6]);
+    const head = new THREE.Group();
+    head.position.y = 0.85;
+    this.mesh(this.box, 0x5b6672, head, [0, 0, 0], [0.7, 0.5, 0.75]);
+    for (const dx of [-0.16, 0.16]) this.mesh(this.cyl, 0x1b1d21, head, [dx, 0.02, -0.62], [0.09, 0.9, 0.09]).rotation.x = Math.PI / 2;
+    this.mesh(this.box, 0x5ee6ff, head, [0, 0.1, 0.1], [0.2, 0.08, 0.08], { basic: true });
+    g.add(head);
+    this.root.add(g);
+    this.coreCannon = { g, head, pos: [0, 2.2, 0], target: null, fx: 0 };
+  }
+
+  // [[target zombie id, …up to 1 + barrels]] per shot since the last flush
+  coreFx(list, zombies) {
+    const cc = this.coreCannon;
+    if (!cc || !list.length) return;
+    const muzzle = [cc.pos[0], cc.pos[1] + 1.05, cc.pos[2]];
+    for (const ids of list) {
+      let first = null;
+      for (const zid of ids) {
+        const z = zombies.list.get(zid);
+        if (!z) continue;
+        const t = [z.pos[0], z.pos[1] + 1.1 * z.s, z.pos[2]];
+        first ??= t;
+        this.world.tracer(muzzle, t, 0x8fe8ff);
+      }
+      if (first) cc.target = first;
+    }
+    cc.fx = 1;
+    this.world.flash(muzzle);
+    this.sound.play('turret', { pos: muzzle, vol: 0.8, ref: 6 });
   }
 
   mat(color, opts = {}) {
@@ -72,6 +158,47 @@ export class Entities {
     return s;
   }
 
+  // A dropped gun's silhouette: shared box/cylinder geometries only, shaped and proportioned per weapon
+  // category (long thin barrel + scope for snipers, wide body for shotguns, a drum for the minigun…) so it
+  // reads as that gun from a distance. The rarity color covers most of the body.
+  gunSilhouette(spin, kind, color) {
+    const dark = 0x2b2f35, m = (geo, c, pos, scale) => this.mesh(geo, c, spin, pos, scale);
+    if (kind === 'pistol') {
+      m(this.box, dark, [0, 0.05, 0.05], [0.1, 0.11, 0.38]);
+      m(this.box, color, [0, -0.14, 0.15], [0.08, 0.2, 0.1]);
+    } else if (kind === 'smg') {
+      m(this.box, dark, [0, 0.06, -0.05], [0.1, 0.12, 0.7]);
+      m(this.box, dark, [0, 0.05, -0.48], [0.05, 0.05, 0.24]);
+      m(this.box, color, [0, -0.15, 0.02], [0.07, 0.22, 0.1]);
+    } else if (kind === 'rifle') {
+      m(this.box, dark, [0, 0.07, -0.1], [0.09, 0.1, 0.95]);
+      m(this.box, dark, [0, 0.06, -0.65], [0.045, 0.045, 0.3]);
+      m(this.box, color, [0, -0.16, 0.08], [0.075, 0.24, 0.12]);
+      m(this.box, color, [0, 0.13, 0.05], [0.05, 0.05, 0.5]);
+    } else if (kind === 'shotgun') {
+      m(this.box, dark, [0, 0.08, 0], [0.16, 0.16, 0.85]);
+      m(this.box, 0x1c1f23, [0, -0.05, 0.05], [0.1, 0.08, 0.55]);
+      m(this.box, color, [0, -0.14, 0.2], [0.09, 0.18, 0.13]);
+    } else if (kind === 'sniper') {
+      m(this.box, dark, [0, 0.05, -0.15], [0.075, 0.08, 1.15]);
+      m(this.box, dark, [0, 0.04, 0.55], [0.09, 0.09, 0.28]);
+      m(this.cyl, 0x14161a, [0, 0.16, -0.15], [0.045, 0.42, 0.045]).rotation.z = Math.PI / 2;
+      m(this.box, color, [0, -0.15, 0.3], [0.065, 0.2, 0.1]);
+    } else if (kind === 'launcher') {
+      m(this.cyl, dark, [0, 0.08, 0], [0.17, 0.9, 0.17]).rotation.x = Math.PI / 2;
+      m(this.box, color, [0, -0.1, 0.4], [0.08, 0.16, 0.16]);
+    } else if (kind === 'minigun') {
+      m(this.cyl, dark, [0, 0.1, -0.2], [0.22, 0.75, 0.22]).rotation.x = Math.PI / 2;
+      m(this.box, color, [0, -0.14, 0.35], [0.16, 0.16, 0.2]);
+    } else if (kind === 'shockwave') {
+      m(this.sphere, dark, [0, 0.08, -0.25], [0.24, 0.24, 0.14]);
+      m(this.box, color, [0, -0.12, 0.25], [0.1, 0.16, 0.14]);
+    } else { // melee
+      m(this.box, color, [0, 0.05, -0.1], [0.05, 0.05, 0.8]);
+      m(this.box, dark, [0, 0, 0.35], [0.07, 0.09, 0.22]);
+    }
+  }
+
   // ---------- ground loot ----------
   // [id, kind ('it' = inventory item, 'ammo', 'mats', 'svsupply'), key, rarity-or-count, x, y, z, { k: item kind, t: tier, el }]
   addPickup([id, kind, key, rn, x, y, z, extra]) {
@@ -80,12 +207,18 @@ export class Entities {
     const g = new THREE.Group(), spin = new THREE.Group();
     g.position.set(x, y, z);
     g.add(spin);
-    let color = 0xffffff;
+    let color = 0xffffff, label = null;
     if (ik === 'gun') {
       color = new THREE.Color(RARITY[rn]?.color ?? '#ffffff').getHex();
-      this.mesh(this.box, 0x2b2f35, spin, [0, 0, 0], [0.12, 0.16, 0.9]);
-      this.mesh(this.box, color, spin, [0, 0.09, -0.1], [0.13, 0.04, 0.5], { basic: true });
-      if (extra.el) this.mesh(this.box, ELEMENTS[extra.el].hex, spin, [0, -0.02, -0.38], [0.14, 0.1, 0.1], { basic: true });
+      const gk = gunIconKind(key), rc = RARITY[rn]?.color ?? '#ffffff';
+      this.gunSilhouette(spin, gk, color);
+      if (extra.el) this.mesh(this.box, ELEMENTS[extra.el].hex, spin, [0, 0.06, GUN_FRONT[gk] ?? -0.4], [0.12, 0.09, 0.09], { basic: true });
+      const { mat, ar } = gunLabel(itemName({ kind: 'gun', id: key, r: rn, tier: extra?.t ?? 1, el: extra?.el ?? null }), rc);
+      label = new THREE.Sprite(mat);
+      label.scale.set(ar * 0.22, 0.22, 1);
+      label.position.y = 1.05;
+      label.visible = false;
+      g.add(label);
     } else if (ik === 'armor') {
       color = new THREE.Color(TIER_COLORS[extra.t || 1]).getHex();
       this.mesh(this.box, 0x55606b, spin, [0, 0, 0], [0.42, 0.34, 0.16]);
@@ -112,7 +245,8 @@ export class Entities {
     ring.position.y = 0.03;
     g.add(ring);
     this.root.add(g);
-    this.pickups.set(id, { id, kind, key, ik, n: rn, r: rn, t: extra?.t ?? 0, el: extra?.el ?? null, pos: [x, y, z], g, spin, seed: Math.random() * 6 });
+    const left = extra?.left ?? Infinity;
+    this.pickups.set(id, { id, kind, key, ik, n: rn, r: rn, t: extra?.t ?? 0, el: extra?.el ?? null, pos: [x, y, z], g, spin, label, seed: Math.random() * 6, expireAt: this.t + left / 1000 });
   }
 
   removePickup(id) {
@@ -232,6 +366,49 @@ export class Entities {
       else for (const [dx, dy] of [[-0.14, 0.08], [0.14, 0.08], [-0.14, -0.1], [0.14, -0.1]]) this.mesh(this.cyl, 0x2b2f35, head, [dx, dy, -0.4], [0.07, 0.5, 0.07]).rotation.x = Math.PI / 2;
       g.add(head);
       d.head = head;
+    } else if (type === 'gturret') { // gatling: a ring of spinning barrels
+      this.mesh(this.cyl, 0x4a5058, g, [0, 0.35, 0], [0.45, 0.7, 0.45]);
+      const head = new THREE.Group();
+      head.position.y = 1.0;
+      this.mesh(this.box, 0x767b80, head, [0, 0, 0], [0.5, 0.36, 0.5]);
+      const barrels = new THREE.Group();
+      barrels.position.set(0, 0, -0.5);
+      for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; this.mesh(this.cyl, 0x1b1d21, barrels, [Math.cos(a) * 0.09, Math.sin(a) * 0.09, -0.22], [0.045, 0.045, 0.5]).rotation.x = Math.PI / 2; }
+      head.add(barrels);
+      g.add(head);
+      d.head = head; d.barrels = barrels;
+    } else if (type === 'frturret') { // frost: icy emitter
+      this.mesh(this.cyl, 0x39505a, g, [0, 0.35, 0], [0.45, 0.7, 0.45]);
+      const head = new THREE.Group();
+      head.position.y = 1.0;
+      this.mesh(this.box, 0x8fd6e8, head, [0, 0, 0], [0.5, 0.36, 0.5]);
+      this.mesh(this.cyl, 0xd9f7ff, head, [0, 0.02, -0.42], [0.14, 0.14, 0.5]).rotation.x = Math.PI / 2;
+      g.add(head);
+      d.head = head;
+    } else if (type === 'flturret') { // flame: scorched housing, wide nozzle
+      this.mesh(this.cyl, 0x3a2a22, g, [0, 0.35, 0], [0.45, 0.7, 0.45]);
+      const head = new THREE.Group();
+      head.position.y = 1.0;
+      this.mesh(this.box, 0x8a2f1c, head, [0, 0, 0], [0.5, 0.36, 0.5]);
+      this.mesh(this.cyl, 0x2b2f35, head, [0, 0, -0.45], [0.16, 0.16, 0.4]).rotation.x = Math.PI / 2;
+      g.add(head);
+      d.head = head;
+    } else if (type === 'tesla') { // tesla coil: rod + glowing ball
+      this.mesh(this.cyl, 0x3a3f4a, g, [0, 0.35, 0], [0.4, 0.7, 0.4]);
+      const head = new THREE.Group();
+      head.position.y = 1.05;
+      this.mesh(this.cyl, 0x5a5468, head, [0, 0.22, 0], [0.11, 0.45, 0.11]);
+      this.mesh(this.sphere, 0x9d8bf0, head, [0, 0.5, 0], [0.17, 0.17, 0.17], { basic: true, transparent: true, opacity: 0.85 });
+      this.sprite(0x9d8bf0, 1.0, head, [0, 0.5, 0]);
+      g.add(head);
+      d.head = head;
+    } else if (type === 'mortar') { // a tube tilted skyward on a squat base
+      this.mesh(this.cyl, 0x3c4034, g, [0, 0.3, 0], [0.5, 0.6, 0.5]);
+      const head = new THREE.Group();
+      head.position.y = 0.75;
+      this.mesh(this.cyl, 0x2b2f2a, head, [0, 0.35, -0.05], [0.16, 0.9, 0.16]).rotation.x = -Math.PI / 3.2;
+      g.add(head);
+      d.head = head;
     } else if (type === 'campfire') {
       for (let i = 0; i < 3; i++) { const l = this.mesh(this.cyl, 0x5a3a22, g, [0, 0.1, 0], [0.09, 1.0, 0.09]); l.rotation.set(Math.PI / 2, i * 1.05, 0); }
       d.flame = this.mesh(new THREE.ConeGeometry(0.35, 0.9, 7), 0xffa13d, g, [0, 0.55, 0], [1, 1, 1], { basic: true, transparent: true, opacity: 0.85 });
@@ -252,16 +429,28 @@ export class Entities {
 
   // [[defense id, target zombie id (0 = trap burst)]]
   defFx(list, zombies) {
+    const AIM = ['turret', 'rturret', 'gturret', 'frturret', 'tesla', 'mortar']; // set a target so the head/barrel tracks it
     for (const [id, zid] of list) {
       const d = this.defs.get(id);
       if (!d) continue;
       d.fx = 1;
-      if (d.type === 'turret' || d.type === 'rturret') {
+      if (AIM.includes(d.type)) {
+        const z = zombies.list.get(zid);
+        if (!z) continue;
+        d.target = [z.pos[0], z.pos[1] + 1.1 * z.s, z.pos[2]];
+        const muzzle = [d.pos[0], d.pos[1] + 1.02, d.pos[2]];
+        if (d.type === 'turret' || d.type === 'gturret') { this.world.tracer(muzzle, d.target, 0xfff0b8); this.world.flash(muzzle); this.sound.play('turret', { pos: muzzle, vol: d.type === 'turret' ? 0.7 : 0.5, ref: 3 }); }
+        else if (d.type === 'frturret') { this.world.tracer(muzzle, d.target, 0xbdf3ff); this.sound.play('impact_w', { pos: muzzle, vol: 0.5, ref: 3 }); }
+        else if (d.type === 'tesla') this.arcFx(muzzle, d.target);
+        // rturret / mortar: the rocket itself (addRocket via the 'rkt' message) carries the visual
+      } else if (d.type === 'flturret') {
         const z = zombies.list.get(zid);
         if (z) {
+          const dx = z.pos[0] - d.pos[0], dz = z.pos[2] - d.pos[2], l = Math.hypot(dx, dz) || 1;
+          const muzzle = [d.pos[0] + (dx / l) * 0.6, d.pos[1] + 1.0, d.pos[2] + (dz / l) * 0.6];
           d.target = [z.pos[0], z.pos[1] + 1.1 * z.s, z.pos[2]];
-          const muzzle = [d.pos[0], d.pos[1] + 1.02, d.pos[2]];
-          if (d.type === 'turret') { this.world.tracer(muzzle, d.target, 0xfff0b8); this.world.flash(muzzle); this.sound.play('turret', { pos: muzzle, vol: 0.7, ref: 3 }); }
+          for (let i = 0; i < 3; i++) this.world.burst([muzzle[0] + (Math.random() - 0.5), muzzle[1], muzzle[2] + (Math.random() - 0.5)], [dx / l, 0.2, dz / l], 0xff8a2a, 4, 3);
+          this.sound.play('fire', { pos: muzzle, vol: 0.5, ref: 3 });
         }
       } else if (d.type === 'flame') {
         for (let i = 0; i < 4; i++) this.world.burst([d.pos[0] + (Math.random() - 0.5) * 3, d.pos[1] + 0.2, d.pos[2] + (Math.random() - 0.5) * 3], [0, 1, 0], 0xff8a2a, 5, 3);
@@ -333,6 +522,38 @@ export class Entities {
     this.root.add(g);
     this.smith = { g, npc, fire };
     this.world.burst([pos.x, 1, pos.z], [0, 1, 0], 0xffb43c, 30, 4);
+  }
+
+  // ---------- the Banker: always present, inside the Core ring ----------
+  bankerShow() {
+    if (this.banker) return;
+    const pos = OUTPOST.banker, g = new THREE.Group();
+    g.position.set(pos.x, 0, pos.z);
+    const yaw = Math.atan2(pos.x, pos.z); // faces the Core
+    this.mesh(this.box, 0x2b2f35, g, [0, 0.45, 0], [1.4, 0.9, 0.8]);   // counter
+    this.mesh(this.box, 0x3a3f46, g, [0, 0.92, 0], [1.5, 0.08, 0.86]); // countertop
+    const npc = new PlayerModel(this.scene, 0x23262b); // dark suit
+    const visorMat = new THREE.MeshLambertMaterial({ color: 0x2ee67a }); // green visor
+    npc.visor.material = visorMat;
+    npc.pose(0, 0, 'knife');
+    const d = Math.hypot(pos.x, pos.z) || 1, bx = pos.x + (pos.x / d) * 0.75, bz = pos.z + (pos.z / d) * 0.75;
+    npc.group.position.set(bx, 0, bz);
+    npc.group.rotation.y = yaw;
+    npc.blob.position.set(bx, 0.02, bz);
+    const sign = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.dollarTex, transparent: true, depthWrite: false }));
+    sign.scale.set(0.9, 0.9, 1);
+    sign.position.set(0, 2.1, 0);
+    g.add(sign);
+    this.root.add(g);
+    this.banker = { g, npc, sign, visorMat };
+  }
+
+  bankerGone() {
+    if (!this.banker) return;
+    this.root.remove(this.banker.g);
+    this.scene.remove(this.banker.npc.group, this.banker.npc.blob);
+    this.banker.visorMat.dispose();
+    this.banker = null;
   }
 
   // ---------- the Maw (wave 15) ----------
@@ -478,16 +699,47 @@ export class Entities {
     this.sound.play('explode', { pos: m.p, vol: 1.3, ref: 8, rate: 0.5 });
   }
 
-  // ---------- specialists: sniper lasers, hazards on the ground, burrower tunnels ----------
-  laser(z, target, ms) {
-    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0xff2020, transparent: true, opacity: 0.85 }));
-    this.root.add(line);
-    (this.lasers ??= []).push({ line, z, target, until: this.t + ms / 1000, dot: this.sprite(0xff2020, 0.35, this.root, target) });
+  // Shockwave Blaster: a zombie slams into a wall (or the Core, a prop…) and drops, stunned
+  slamFx(m) {
+    this.world.burst(m.p, [0, 1, 0], 0x8a7a5a, 14, 6);
+    this.sound.play('land', { pos: m.p, vol: 1.1, ref: 6, rate: 0.55 });
   }
 
-  // acid (bloater), ink (hexer), fire (pyro) patches
+  // Iron Golem: a heavy crash + debris burst every time it smashes a piece (camera shake is holdout.js's job)
+  golemSmash(p) {
+    for (let i = 0; i < 3; i++) this.world.burst([p[0] + (Math.random() - 0.5) * 1.5, p[1] + (Math.random() - 0.5), p[2] + (Math.random() - 0.5) * 1.5], [0, 1, 0], 0x8a7a5a, 10, 6);
+    this.sound.play('break_M', { pos: p, vol: 1.3, ref: 8, rate: 0.6 });
+  }
+
+  // the Brood Titan drops fresh minions off its back: a small landing puff where they fall
+  mdropFx(p) {
+    this.world.burst(p, [0, -1, 0], 0x4a5a2a, 8, 3);
+    this.sound.play('land', { pos: p, vol: 0.7, ref: 5, rate: 0.8 });
+  }
+
+  // Maw Fang's "bite" perk: a small red shockwave ring where nearby zombies got pulled in
+  biteFx(m) {
+    const ring = new THREE.Mesh(this.ring, new THREE.MeshBasicMaterial({ color: 0xff2a2a, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }));
+    ring.position.set(m.p[0], 0.08, m.p[2]);
+    ring.scale.set(6 / 0.62, 1, 6 / 0.62);
+    this.root.add(ring);
+    this.flashes.push({ s: ring, t: 0.3, ring: 6 / 0.62 });
+    this.sound.play('zap', { pos: m.p, vol: 0.8, ref: 4 });
+  }
+
+  // ---------- specialists: sniper lasers, hazards on the ground, burrower tunnels ----------
+  // night: thicker/brighter telegraph so a sniper's laser reads clearly in the dark (client-only touch-up)
+  // from/target are locked at aim-start by the server — the line drawn here is exactly what the shot will trace.
+  laser(z, from, target, ms, night = false) {
+    const color = night ? 0xff5a5a : 0xff2020;
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...from), new THREE.Vector3(...target)]), new THREE.LineBasicMaterial({ color, transparent: true, opacity: night ? 0.95 : 0.85, linewidth: night ? 3 : 1 }));
+    this.root.add(line);
+    (this.lasers ??= []).push({ line, z, from, target, until: this.t + ms / 1000, dot: this.sprite(color, night ? 0.55 : 0.35, this.root, target), night });
+  }
+
+  // acid (bloater), ink (hexer), fire (pyro), acidz (Brood Launcher bomblets, zombies only) patches
   addHazard(m) {
-    const color = { acid: 0x8fe03a, ink: 0x2a0f3a, fire: 0xff6a1a }[m.k] ?? 0xffffff;
+    const color = { acid: 0x8fe03a, acidz: 0x8fe03a, ink: 0x2a0f3a, fire: 0xff6a1a }[m.k] ?? 0xffffff;
     const disc = this.mesh(new THREE.CircleGeometry(m.r, 28).rotateX(-Math.PI / 2), color, this.root, [m.p[0], Math.max(0, m.p[1]) + 0.05, m.p[2]], [1, 1, 1],
       { basic: true, transparent: true, opacity: m.k === 'ink' ? 0.7 : 0.45, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 });
     if (m.k === 'ink') { // a cloud you can't see through
@@ -508,9 +760,7 @@ export class Entities {
     if (this.lasers) for (let i = this.lasers.length - 1; i >= 0; i--) {
       const L = this.lasers[i], z = zombies.list.get(L.z);
       if (this.t > L.until || !z || z.dead) { this.root.remove(L.line, L.dot); L.line.geometry.dispose(); L.line.material.dispose(); this.lasers.splice(i, 1); continue; }
-      const a = [z.pos[0], z.pos[1] + 1.55 * z.s, z.pos[2]], pos = L.line.geometry.attributes.position;
-      pos.setXYZ(0, ...a); pos.setXYZ(1, ...L.target); pos.needsUpdate = true;
-      L.line.material.opacity = 0.4 + 0.5 * Math.abs(Math.sin(this.t * 18));
+      L.line.material.opacity = (L.night ? 0.55 : 0.4) + 0.5 * Math.abs(Math.sin(this.t * 18));
     }
     if (this.hazards) for (let i = this.hazards.length - 1; i >= 0; i--) {
       const h = this.hazards[i];
@@ -518,7 +768,7 @@ export class Entities {
       if (this.t < h.next) continue;
       h.next = this.t + (h.k === 'ink' ? 0.12 : 0.25);
       const a = Math.random() * 6.28, r = Math.random() * h.r, p = [h.p[0] + Math.cos(a) * r, Math.max(0, h.p[1]) + 0.1, h.p[2] + Math.sin(a) * r];
-      this.world.burst(p, [0, 1, 0], h.k === 'acid' ? 0xb8ff5a : h.k === 'ink' ? 0x1a0826 : 0xffa23a, h.k === 'ink' ? 4 : 2, h.k === 'ink' ? 1.2 : 1.8);
+      this.world.burst(p, [0, 1, 0], h.k === 'acid' || h.k === 'acidz' ? 0xb8ff5a : h.k === 'ink' ? 0x1a0826 : 0xffa23a, h.k === 'ink' ? 4 : 2, h.k === 'ink' ? 1.2 : 1.8);
     }
     if (this.digs) for (let i = this.digs.length - 1; i >= 0; i--) {
       const d = this.digs[i], k = (this.t - d.t0) / d.T;
@@ -555,20 +805,32 @@ export class Entities {
   }
 
   // ---------- survivors ----------
-  svAdd(id, name, tier = 0) {
+  svAdd(id, name, tier = 0, cls = 'ranger') {
     if (this.survivors.has(id)) return;
-    const s = { id, name, model: null, pos: [0, -50, 0], from: [0, -50, 0], to: [0, -50, 0], yaw: 0, t: 1, state: 0, hp: 1, tier, carrier: '', ammo: 0 };
+    const s = { id, name, model: null, pos: [0, -50, 0], from: [0, -50, 0], to: [0, -50, 0], yaw: 0, t: 1, state: 0, hp: 1, tier, cls, carrier: '', ammo: 0 };
     this.svModel(s);
     this.survivors.set(id, s);
   }
 
-  // shirt color and gun show the survivor's tier
+  // class sets the silhouette/color/gun (SURVIVOR_CLASSES); tier just sets its quality
   svModel(s) {
     if (s.model) this.scene.remove(s.model.group, s.model.blob);
-    const T = SURVIVOR.tiers[s.tier] ?? SURVIVOR.tiers[0];
-    s.model = new PlayerModel(this.scene, T.color);
-    s.model.pose(0, 0, T.w);
+    const cls = SURVIVOR_CLASSES[s.cls] ?? SURVIVOR_CLASSES.ranger, gun = survivorGun(s.tier, s.cls), g = (s.model = new PlayerModel(this.scene, cls.color)).group;
+    s.model.pose(0, 0, gun.w);
     s.model.setDead(s.state === 0);
+    if (s.cls === 'guardian') { // riot shield strapped to the forearm, bulky plates on the chest
+      this.mesh(this.box, 0x2f3742, g, [-0.4, 1.15, -0.04], [0.07, 0.62, 0.4]);
+      this.mesh(this.box, 0x6b7684, g, [-0.4, 1.15, -0.04], [0.08, 0.06, 0.42]);
+      this.mesh(this.box, 0x4d5866, g, [0, 1.33, -0.17], [0.3, 0.22, 0.05]);
+      this.mesh(this.box, 0x4d5866, g, [0, 1.06, -0.16], [0.26, 0.1, 0.05]);
+    } else if (s.cls === 'medic') { // a red cross on the chest, a satchel on the hip
+      this.mesh(this.box, 0xd23f3f, g, [0, 1.31, -0.165], [0.16, 0.05, 0.03]);
+      this.mesh(this.box, 0xd23f3f, g, [0, 1.31, -0.165], [0.05, 0.16, 0.03]);
+      this.mesh(this.box, 0x39492f, g, [0.27, 0.92, 0.04], [0.14, 0.16, 0.1]);
+    } else if (s.cls === 'ranger') { // a cap
+      this.mesh(this.box, 0x2b2f22, g, [0, 1.85, 0.01], [0.12, 0.05, 0.12]);
+      this.mesh(this.box, 0x2b2f22, g, [0, 1.79, -0.13], [0.1, 0.02, 0.08]);
+    }
   }
 
   // [id, state (0 wounded, 1 carried, 2 active), x, y, z, yaw, hp01, tier, carrier, ammo]
@@ -589,7 +851,7 @@ export class Entities {
       if (!s || s.state !== 2) continue;
       const o = [s.pos[0], s.pos[1] + 1.4, s.pos[2]];
       this.world.tracer(o, [ex, ey, ez], 0xffd28a);
-      if (Math.random() < 0.6) this.sound.play('shot_' + (SURVIVOR.tiers[s.tier]?.snd ?? 'mac10'), { pos: o, vol: 0.55, ref: 3, roll: 1.2 });
+      if (Math.random() < 0.6) this.sound.play('shot_' + survivorGun(s.tier, s.cls).snd, { pos: o, vol: 0.55, ref: 3, roll: 1.2 });
     }
     return seen;
   }
@@ -622,13 +884,18 @@ export class Entities {
     }
     const points = SKY_POINTS.map(([x, y, z], i) => {
       const p = this.mesh(this.sphere, 0xff4fd8, body, [x, y, z], Array(3).fill(SKY.pointR / SKY.scale), { basic: true });
-      this.sprite(0xff4fd8, (SKY.pointR * 3) / SKY.scale, p, [0, 0, 0]).scale.setScalar(3);
+      const glow = this.sprite(0xff4fd8, (SKY.pointR * 3) / SKY.scale, p, [0, 0, 0]);
+      glow.scale.setScalar(3);
+      p.userData.glow = glow; // its own (uncached) material — safe to brighten just this one when highlighted
       return p;
     });
     this.root.add(g);
-    this.sky = { g, body, wings, points, t0: now - m.el / 1000, hp: [...m.hp], max: m.max, dead: false, fall: 0 };
+    this.sky = { g, body, wings, points, t0: now - m.el / 1000, hp: [...m.hp], max: m.max, dead: false, fall: 0, backIdx: -1 };
     this.sound.play('sky_roar', { vol: 0.9 });
   }
+
+  // server told us every remaining weak point is on its back: pulse that one harder so it stands out
+  skyBack(i) { if (this.sky) this.sky.backIdx = i; }
 
   skyHit(i, hp) {
     const s = this.sky;
@@ -668,7 +935,13 @@ export class Entities {
   update(dt, now, ctx) {
     this.t += dt;
     const bob = Math.sin(this.t * 2.2);
-    for (const pk of this.pickups.values()) { pk.spin.rotation.y += dt * 1.6; pk.spin.position.y = 0.45 + Math.sin(this.t * 2 + pk.seed) * 0.07; }
+    for (const pk of this.pickups.values()) {
+      pk.spin.rotation.y += dt * 1.6;
+      pk.spin.position.y = 0.45 + Math.sin(this.t * 2 + pk.seed) * 0.07;
+      const left = pk.expireAt - this.t;
+      pk.g.visible = !(left > 0 && left < PICKUP_BLINK && Math.floor(this.t * 5) % 2 === 0);
+      if (pk.label) pk.label.visible = Math.hypot(pk.pos[0] - ctx.me[0], pk.pos[1] - ctx.me[1], pk.pos[2] - ctx.me[2]) < PICKUP_LABEL_R;
+    }
     for (const c of this.chests.values()) {
       c.glow.material.opacity = 0.55 + 0.35 * Math.sin(this.t * 3 + c.id);
       const d = Math.hypot(c.x - ctx.me[0], c.z - ctx.me[2]);
@@ -681,11 +954,20 @@ export class Entities {
     for (const d of this.defs.values()) {
       d.fx = Math.max(0, d.fx - dt * 3);
       if (d.type === 'spikes' && d.head) d.head.position.y = d.fx * 0.12 - 0.05;
-      if ((d.type === 'turret' || d.type === 'rturret') && d.head && d.target) {
+      if (d.head && d.target) { // every turret-family type: yaw the head/barrel toward its last target
         const want = Math.atan2(-(d.target[0] - d.pos[0]), -(d.target[2] - d.pos[2]));
         d.head.rotation.y += Math.atan2(Math.sin(want - d.head.rotation.y), Math.cos(want - d.head.rotation.y)) * Math.min(1, dt * 10);
       }
+      if (d.type === 'gturret' && d.barrels) d.barrels.rotation.z += dt * (4 + d.fx * 24); // spins fast while firing
       if (d.type === 'campfire') { d.flame.scale.set(1 + Math.sin(this.t * 13) * 0.08, 1 + Math.sin(this.t * 17) * 0.15, 1); d.light.material.opacity = 0.6 + Math.sin(this.t * 11) * 0.15; }
+    }
+    if (this.coreCannon) {
+      const cc = this.coreCannon;
+      cc.fx = Math.max(0, cc.fx - dt * 3);
+      if (cc.target) {
+        const want = Math.atan2(-(cc.target[0] - cc.pos[0]), -(cc.target[2] - cc.pos[2]));
+        cc.head.rotation.y += Math.atan2(Math.sin(want - cc.head.rotation.y), Math.cos(want - cc.head.rotation.y)) * Math.min(1, dt * 10);
+      }
     }
     for (const [id, t] of this.thrown) {
       t.vel[1] -= G_THROW * dt;
@@ -747,7 +1029,12 @@ export class Entities {
         k.g.rotation.set(0, tr.yaw, 0); // must match skyPoint() exactly: weak points are hit-tested there
         const flap = Math.sin(this.t * 2.4) * 0.5;
         k.wings[0].rotation.z = flap; k.wings[1].rotation.z = -flap;
-        for (const p of k.points) if (p.visible) p.scale.setScalar((SKY.pointR / SKY.scale) * (1 + Math.sin(this.t * 6) * 0.15));
+        k.points.forEach((p, i) => {
+          if (!p.visible) return;
+          const hi = i === k.backIdx; // the last-standing back weak point: pulse brighter and bigger
+          p.scale.setScalar((SKY.pointR / SKY.scale) * (1 + Math.sin(this.t * (hi ? 10 : 6)) * (hi ? 0.4 : 0.15)));
+          if (p.userData.glow) p.userData.glow.scale.setScalar(((SKY.pointR * 3) / SKY.scale) * (hi ? 1.4 + Math.sin(this.t * 10) * 0.35 : 1));
+        });
       }
     }
   }
@@ -793,6 +1080,7 @@ export class Entities {
   // full world sync (join / new match): drop everything, the server re-sends what still exists
   clearAll() {
     this.clearPings();
+    if (this.coreCannon) this.coreCannon.target = null;
     this.clearPickups();
     this.setDefs([]);
     this.setChests([]);
@@ -805,6 +1093,7 @@ export class Entities {
     if (this.maw) { this.root.remove(this.maw.g); if (this.maw.warn) this.root.remove(this.maw.warn); this.maw = null; }
     this.setThumpers([]);
     if (this.smith) { this.root.remove(this.smith.g); this.scene.remove(this.smith.npc.group, this.smith.npc.blob); this.smith = null; }
+    this.bankerGone();
     for (const L of this.lasers ?? []) this.root.remove(L.line, L.dot);
     this.lasers = [];
     for (const h of this.hazards ?? []) this.root.remove(h.disc);
@@ -814,9 +1103,11 @@ export class Entities {
 
   dispose() {
     if (this.smith) this.scene.remove(this.smith.npc.group, this.smith.npc.blob);
+    this.bankerGone();
     this.clearSurvivors();
     this.scene.remove(this.root);
     this.glow.dispose();
+    this.dollarTex.dispose();
     for (const m of this.mats.values()) m.dispose();
   }
 }

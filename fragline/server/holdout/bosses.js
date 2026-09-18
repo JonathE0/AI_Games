@@ -1,23 +1,28 @@
 // Boss waves after the Colossus (skyboss.js):
 //  - wave 10 (25, 40…): the Brood Titan. Announced at the wave start, it arrives once the regular horde is
 //    cleared: a giant that stomps builds flat, carrying riders that throw acid and can't be hurt until they
-//    leap off (every ~18 s) or the Titan dies. Killing it unlocks the Blacksmith.
+//    leap off (two immediately, then every ~12 s) or the Titan dies. It also drops fresh runners/stalkers off
+//    its back every 8 s, and carries two permanent Sniper Riders that never dismount on their own and snipe
+//    like a ground Sniper.
 //  - wave 15 (30, 45…): the Maw. A colossal worm that hunts underground and erupts under builds and players.
 //    Seismic thumpers in the houses lure it up with its mouth open (its gullet takes triple damage); below
-//    60 % it spews swoopers, below 25 % it tries to devour the Core unless the team interrupts it.
+//    60 % it spews stalkers, below 25 % it tries to devour the Core unless the team interrupts it.
 import { ZTYPES, bossFor, bossCycle } from '../../shared/zombies.js';
 import { THUMPER_SPOTS } from '../../shared/outpost.js';
 import { rollLoot, MONEY_CAP } from '../../shared/holdout.js';
 import { raySphere } from '../../shared/skyboss.js';
 import { distToBox } from '../../shared/build.js';
-import { addHazard } from './behaviors.js';
+import { addHazard, onBeam } from './behaviors.js';
 
 const r2 = v => Math.round(v * 100) / 100;
 export const MAW = {
   hp: 12000, speed: 6.5, eruptR: 4.2, eruptDmg: 35, eruptSdmg: 900, warn: 1500, lure: 10000, thumpHold: 5000, pulse: 20000,
   gulletR: 1.6, gulletY: 7.5, bodyR: 3.6, devourWind: 12000, devourDmg: 0.4, devourBreak: 0.08, coreR: 5,
 };
-const RIDER_SEATS = [[-0.35, 0.18], [0.35, 0.18], [0, 0.36], [-0.3, -0.05], [0.3, -0.05], [0, 0.05], [-0.2, 0.3], [0.2, 0.3]];
+// last 2 seats are reserved for the permanent Sniper Riders (see 'fighting' below) — never handed to normal riders
+const RIDER_SEATS = [[-0.35, 0.18], [0.35, 0.18], [0, 0.36], [-0.3, -0.05], [0.3, -0.05], [0, 0.05], [-0.2, 0.3], [0.2, 0.3], [-0.15, -0.22], [0.15, -0.22]];
+const SNIPER_SEATS = 2;
+const RIDER_DROP = 12000, MINION_DROP = 8000;
 
 export class Bosses {
   constructor(room) { this.room = room; this.reset(); }
@@ -26,7 +31,7 @@ export class Bosses {
     this.titan = null;        // { phase: 'waiting' | 'coming' | 'fighting', z, at }
     this.maw = null;
     this.thumpers = [];
-    this.smith = false;       // the Blacksmith unlocks when the first Titan falls
+    this.smith = false;       // the Blacksmith unlocks once wave 7 is cleared (see room.js waveCleared)
   }
 
   // wave director asks: may the wave end?
@@ -60,30 +65,54 @@ export class Bosses {
       const z = room.spawnZombie('titan', lane, '');
       z.maxHp = z.hp = Math.round(ZTYPES.titan.hp * (1 + 0.6 * (room.activeCount() - 1)) * (1 + 0.5 * bossCycle(T.w)));
       T.z = z;
-      T.nextDrop = now + 18000;
+      T.nextDrop = now + RIDER_DROP;
+      T.nextMinion = now + MINION_DROP;
       z.riders = [];
-      const n = Math.min(RIDER_SEATS.length, 4 + room.activeCount());
+      const n = Math.min(RIDER_SEATS.length - SNIPER_SEATS, 4 + room.activeCount());
       for (let i = 0; i < n; i++) {
         const r = room.spawnZombie('rider', lane, '');
         r.mount = z.id; r.seat = RIDER_SEATS[i]; r.nextAtk = now + 3000 + i * 500;
         z.riders.push(r);
       }
+      for (let i = 0; i < SNIPER_SEATS; i++) { // permanent: never dismount on their own, snipe once they fall
+        const r = room.spawnZombie('broodsniper', lane, '');
+        r.mount = z.id; r.seat = RIDER_SEATS[RIDER_SEATS.length - SNIPER_SEATS + i]; r.nextAtk = now + 4000 + i * 1200; r.permanent = true;
+        z.riders.push(r);
+      }
       room.broadcast({ t: 'boss', ev: 'titan', id: z.id, riders: z.riders.map(r => r.id) });
+      // two riders leap down and start fighting the moment it arrives, instead of waiting for the first cycle
+      const first = z.riders.filter(r => !r.permanent);
+      for (const r of first.slice(0, 2)) this.dismount(r, now, false);
     } else if (T.phase === 'fighting') {
       const z = T.z;
       if (z.dead) {
         T.phase = 'dead';
-        this.smith = true;
         for (const r of z.riders) if (!r.dead && r.mount) this.dismount(r, now, true);
+        room.inventory.scatter([{ kind: 'gun', w: 'broodlauncher', r: 4, tier: 3, el: null }], [z.pos[0], z.pos[1], z.pos[2]], 2.4, true);
+        room.broadcast({ t: 'msg', text: 'The Brood Titan dropped the Brood Launcher!' });
         room.broadcast({ t: 'boss', ev: 'titandie', by: z.lastHitBy ?? null });
-        room.onSmithUnlocked?.();
         return;
       }
-      if (now >= T.nextDrop) { // one or two riders leap down to fight
-        T.nextDrop = now + 18000;
-        const mounted = z.riders.filter(r => !r.dead && r.mount);
+      if (now >= T.nextDrop) { // one or two (non-permanent) riders leap down to fight
+        T.nextDrop = now + RIDER_DROP;
+        const mounted = z.riders.filter(r => !r.dead && r.mount && !r.permanent);
         for (const r of mounted.slice(0, 1 + (Math.random() < 0.5 ? 1 : 0))) this.dismount(r, now, false);
       }
+      if (now >= T.nextMinion) { this.dropMinions(z, now); T.nextMinion = now + MINION_DROP; }
+    }
+  }
+
+  // 2 fresh runners/stalkers fall off the Titan's back while it lives.
+  dropMinions(z, now) {
+    const room = this.room, lane = room.director.lanes[0] ?? 'N';
+    for (let i = 0; i < 2; i++) {
+      const type = Math.random() < 0.5 ? 'runner' : 'stalker', m = room.spawnZombie(type, lane, '');
+      const a = z.yaw + Math.PI + (Math.random() - 0.5) * 0.7;
+      m.pos[0] = z.pos[0] + Math.sin(a) * z.s * 0.4;
+      m.pos[2] = z.pos[2] + Math.cos(a) * z.s * 0.4;
+      m.pos[1] = z.pos[1] + 3 * z.s;
+      m.vel = [0, 0, 0];
+      room.broadcast({ t: 'boss', ev: 'mdrop', p: [r2(m.pos[0]), r2(m.pos[1]), r2(m.pos[2])] });
     }
   }
 
@@ -107,6 +136,7 @@ export class Bosses {
     z.pos[1] = t.pos[1] + 1.45 * s;
     z.yaw = t.yaw;
     z.vel = [0, 0, 0];
+    if (z.t.sniper) return this.stepRiderSniper(z, now);
     if (now < z.nextAtk) return;
     let best = null, bd = 26;
     for (const p of room.targets()) {
@@ -119,6 +149,43 @@ export class Bosses {
     const o = [z.pos[0], z.pos[1] + 1, z.pos[2]], p = [best.st.p[0], best.st.p[1] + 0.9, best.st.p[2]];
     const dx = p[0] - o[0], dy = p[1] - o[1], dz = p[2] - o[2], dh = Math.hypot(dx, dz), T = Math.min(2, Math.max(0.8, dh / 12));
     room.addProjectile(o, [dx / T, dy / T + 0.5 * 12 * T, dz / T], z);
+  }
+
+  // permanent Sniper Riders: aim (laser telegraph), then fire at range with line of sight, like a ground Sniper
+  stepRiderSniper(z, now) {
+    const room = this.room, t = z.t, eye = [z.pos[0], z.pos[1] + 0.6, z.pos[2]];
+    if (z.state === 1) { // aiming
+      if (now < z.stateEnd) return;
+      z.state = 0;
+      z.nextAtk = now + t.cooldown * 1000 + Math.random() * 800;
+      const c = z.target;
+      z.target = null;
+      const alive = c && (c.kind === 'sv' || (c.ref.alive && !c.ref.downed));
+      if (c && alive) {
+        const from = z.lockEye ?? eye, at = c.at; // the exact line the telegraph showed, not a re-aim
+        const clear = room.lineOfSight(from, at);
+        room.broadcast({ t: 'zshot', id: z.id, a: from.map(r2), b: at.map(r2), hit: clear });
+        if (clear) {
+          const cur = c.kind === 'sv' ? [c.ref.pos[0], c.ref.pos[1] + 1.3, c.ref.pos[2]] : [c.ref.st.p[0], c.ref.st.p[1] + 1.3, c.ref.st.p[2]];
+          if (onBeam(from, at, cur)) { if (c.kind === 'sv') room.survivors.hurt(c.ref, t.npcDmg); else room.hurtPlayer(c.ref, t.dmg, z); }
+        }
+      }
+      z.lockEye = null;
+      return;
+    }
+    if (now < z.nextAtk) return;
+    let best = null, bd = t.range;
+    for (const p of room.targets()) {
+      if (!p.alive || p.downed || p.state === 'carried') continue;
+      const at = [p.st.p[0], p.st.p[1] + 1.3, p.st.p[2]], d = Math.hypot(at[0] - eye[0], at[2] - eye[2]);
+      if (d < bd && room.lineOfSight(eye, at)) { bd = d; best = { kind: p.isSurvivor ? 'sv' : 'p', ref: p, at }; }
+    }
+    if (!best) return;
+    z.state = 1;
+    z.stateEnd = now + t.windup * 1000;
+    z.target = best;
+    z.lockEye = eye;
+    room.broadcast({ t: 'zaim', id: z.id, a: eye.map(r2), p: best.at.map(r2), ms: t.windup * 1000 });
   }
 
   // riders can't be hurt while mounted
@@ -219,7 +286,7 @@ export class Bosses {
     room.damageProps([m.x, 1, m.z], MAW.eruptR, 500);
     if (m.stage >= 2) { // it spews parasites and acid
       addHazard(room, 'acid', at, 3, 5, 12 * mul, 30);
-      for (let i = 0; i < 2; i++) { const z = room.spawnZombie('swooper', room.director.lanes[0] ?? 'N', ''); z.pos = [m.x + (Math.random() - 0.5) * 3, 6, m.z + (Math.random() - 0.5) * 3]; }
+      for (let i = 0; i < 2; i++) { const z = room.spawnZombie('stalker', room.director.lanes[0] ?? 'N', ''); z.pos = [m.x + (Math.random() - 0.5) * 3, 6, m.z + (Math.random() - 0.5) * 3]; }
     }
     m.mode = 'erupt'; m.until = now + 1600;
     room.broadcast({ t: 'maw', ev: 'erupt', x: r2(m.x), z: r2(m.z), r: MAW.eruptR });
@@ -264,10 +331,10 @@ export class Bosses {
     m.dead = true;
     const at = [m.x, 0, m.z];
     for (const q of room.players) { q.money = Math.min(MONEY_CAP, q.money + 3000); room.sendInv(q); }
-    const el = ['fire', 'water', 'ice', 'shock'][Math.floor(Math.random() * 4)];
-    room.inventory.scatter([{ kind: 'gun', w: 'heavy_ar', r: 4, tier: 3, el }, ...rollLoot('boss')], at, 3);
+    room.inventory.scatter([{ kind: 'gun', w: 'mawfang', r: 4, tier: 3, el: null }, ...rollLoot('boss')], at, 3, true);
     this.thumpers = [];
     this.syncThumpers();
+    room.broadcast({ t: 'msg', text: 'The Maw dropped the Maw Fang!' });
     room.broadcast({ t: 'maw', ev: 'die', x: r2(m.x), z: r2(m.z), by: by?.id ?? null });
   }
 

@@ -165,7 +165,7 @@ gun('gl', { name: 'Grenade Launcher', short: 'Launcher', cat: 'launcher', model:
   acc: { stand: 0.3, crouch: 0.2, move: 0.9, air: 2, fire: 0, fireMax: 0, recover: 0.5 }, recoil: pattern(6, [[0, 0, 0], [1, 0, 2.2], [5, 0, 3]]), idxRecover: 3 });
 // crowd control: a cone of force that throws zombies back (light ones far, heavy ones barely)
 gun('kinetic', { name: 'Shockwave Blaster', short: 'Shockwave', cat: 'shotgun', model: 'kinetic', snd: 'kinetic', ammo: 'shells', projectile: 'blast', price: 1800,
-  dmg: 22, cone: 60, blastRange: 9, push: 2.5, head: 1, pen: 1, range: 1, rpm: 45, mag: 8, reload: 0.5, reloadStart: 0.3, shellReload: true, deploy: 0.6, speed: 5.8,
+  dmg: 66, cone: 60, blastRange: 9, head: 1, pen: 1, range: 1, rpm: 45, mag: 8, reload: 0.5, reloadStart: 0.3, shellReload: true, deploy: 0.6, speed: 5.8,
   acc: { stand: 0.3, crouch: 0.25, move: 0.8, air: 2, fire: 0, fireMax: 0, recover: 0.5 }, recoil: pattern(8, [[0, 0, 0], [1, 0, 3], [7, 0, 3.5]]), idxRecover: 3 });
 // the Stalker's blade: a wide slash that hits everything in front of you, and you run faster holding it
 gun('blade', { name: 'Slasher Blade', short: 'Blade', cat: 'melee', model: 'blade', snd: 'knife', price: 0, pellets: 6, arc: 120, speedBuff: 1.15,
@@ -174,29 +174,36 @@ gun('minigun', { name: 'Minigun', short: 'Minigun', cat: 'rifle', model: 'minigu
   dmg: 22, head: 1.5, pen: 0.85, range: 0.93, rpm: 1000, mag: 200, reload: 4.2, deploy: 1.0, speed: 4.6,
   acc: { stand: 1.1, crouch: 0.9, move: 0.8, air: 2.5, fire: 0.05, fireMax: 1.6, recover: 0.4 }, recoil: soft(200, 1.4, 0.3) });
 
+// ---------- boss weapons: unique drops only (never sold), always Legendary tier III with no element ----------
+gun('skybreaker', { name: 'Skybreaker', short: 'Skybreaker', cat: 'sniper', model: 'awp', snd: 'awp', bolt: true, ammo: 'heavy', boss: true, price: 0,
+  dmg: 150, pen: 0.975, range: 0.99, wallPen: 2.5, rpm: 41, mag: 8, reload: 3.2, deploy: 1.25, speed: 5.08,
+  scope: [2.75, 11.4], scopedSpeed: 2.54, pierce: 8, mark: true, // pierce: hits up to 8 zombies per bullet; mark: +25% dmg taken for 5s
+  acc: { stand: 0.04, crouch: 0.03, unscoped: 7, move: 10, air: 20, fire: 0, fireMax: 0, recover: 0.3 },
+  recoil: pattern(8, [[0, 0, 0], [1, 0, 3], [7, 0, 4]]), idxRecover: 3, jitter: 0.3 });
+gun('broodlauncher', { name: 'Brood Launcher', short: 'Brood Launcher', cat: 'launcher', model: 'gl', snd: 'rocket', ammo: 'rockets', projectile: 'grenade', boss: true, price: 0,
+  dmg: 150, splash: 3.6, bomblets: 3, head: 1, pen: 1, range: 1, rpm: 90, mag: 6, reload: 0.55, reloadStart: 0.35, shellReload: true, deploy: 0.7, speed: 5.6,
+  acc: { stand: 0.3, crouch: 0.2, move: 0.9, air: 2, fire: 0, fireMax: 0, recover: 0.5 }, recoil: pattern(6, [[0, 0, 0], [1, 0, 2.2], [5, 0, 3]]), idxRecover: 3 });
+gun('mawfang', { name: 'Maw Fang', short: 'Maw Fang', cat: 'shotgun', model: 'shotgun', snd: 'nova', ammo: 'shells', boss: true, price: 0, wallPen: 0.5,
+  dmg: 20, pellets: 12, pelletSpread: 3.2, head: 2, pen: 0.8, range: 0.7, rpm: 55, mag: 12, reload: 0.5, reloadStart: 0.3, shellReload: true, deploy: 0.6, speed: 5.8,
+  lifesteal: 0.1, bite: 5, // lifesteal: heal 10% of damage dealt; bite: every 5th shot pulls nearby zombies in
+  acc: { stand: 0.3, crouch: 0.25, move: 0.8, air: 2, fire: 0, fireMax: 0, recover: 0.5 }, recoil: pattern(12, [[0, 0, 0], [1, 0, 2.4], [11, 0, 3]]), idxRecover: 3 });
+gun('cleaver', { name: 'Alpha Cleaver', short: 'Cleaver', cat: 'melee', model: 'blade', snd: 'knife', boss: true, price: 0, pellets: 8, arc: 150, speedBuff: 1.15, knockdown: true,
+  dmg: 110, dmgAlt: 170, pen: 0.9, range: 1, rpm: 100, mag: 0, reload: 0, deploy: 0.4, speed: 6.35, reach: 3.4, acc: null, recoil: [[0, 0]], idxRecover: 1 });
+
+// Boss gun perk blurbs, appended to the shop/inventory gun description (holdout_ui.js, inventory_ui.js).
+export const BOSS_PERKS = {
+  skybreaker: 'BOSS · pierces and marks zombies (+25% damage)',
+  broodlauncher: 'BOSS · scatters acid bomblets on impact',
+  mawfang: 'BOSS · lifesteal · every 5th shot pulls zombies in',
+  cleaver: 'BOSS · knocks down everything it hits',
+};
+
 // Holdout: holding a non-gun hotbar item (grenade, medkit, trap…) — nothing to shoot, the item gets used.
 def('hold_item', { mode: 'hold', name: 'Item', short: 'Item', cat: 'item', model: 'item', slot: 1, price: 0, reward: 0,
   dmg: 0, pen: 0, range: 1, rpm: 120, mag: 0, reserve: 0, reload: 0, deploy: 0.25, speed: 6.2 });
 
 export const WEAPONS = W;
 
-export const GEAR = {
-  kevlar: { id: 'kevlar', name: 'Kevlar Vest', price: 650 },
-  helmet: { id: 'helmet', name: 'Kevlar + Helmet', price: 1000, upgrade: 350 },
-  ammo: { id: 'ammo', name: 'Ammo Refill', price: 300 }, // Zombie Holdout only
-};
-
-export const BUY_MENU = [
-  ['Pistols', ['glock', 'usp', 'p250', 'deagle']],
-  ['SMGs', ['mac10', 'mp9', 'p90']],
-  ['Heavy', ['nova']],
-  ['Rifles', ['galil', 'ak47', 'm4a4', 'm4a1s']],
-  ['Snipers', ['ssg08', 'awp']],
-  ['Gear', ['kevlar', 'helmet']],
-];
-
-export const ECON = { start: 800, max: 16000, win: 3250, lossBonus: [1400, 1900, 2400, 2900, 3400], warmup: 16000 };
-export const DEFAULT_PISTOL = { T: 'glock', CT: 'usp' };
 export const PART_MULT = { chest: 1, arm: 1, stomach: 1.25, legs: 0.75 };
 const RANGE_UNIT = 12.7; // CS range modifiers apply per 500 units (12.7 m)
 

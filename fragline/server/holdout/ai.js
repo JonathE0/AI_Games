@@ -4,7 +4,8 @@
 import { P, moveCharacter, rayWorld } from '../../shared/physics.js';
 import { distToBox, boxCenter } from '../../shared/build.js';
 import { AGGRO } from '../../shared/zombies.js';
-import { stepSniper, stepFlyer, tryBurrow, stepBurrow, onMeleeHit } from './behaviors.js';
+import { SURVIVOR_CLASSES } from '../../shared/holdout.js';
+import { stepSniper, tryBurrow, stepBurrow, onMeleeHit } from './behaviors.js';
 
 export const ZS = { MOVE: 0, WIND: 1, STRIKE: 2, LOB: 3 }; // also the animation state sent to clients
 export const GLOB_GRAVITY = 12;
@@ -32,12 +33,13 @@ export function updateZombies(room, dt, now) {
 }
 
 function think(room, z, now) {
-  if (now < z.aggroBlock) { z.aggro = null; return; }
+  if (z.t.noAggro || now < z.aggroBlock) { z.aggro = null; return; } // Core Seekers never chase players
   const t = z.t, pos = z.pos, eye = [pos[0], pos[1] + 1.6 * z.s, pos[2]];
   let best = null, bd = t.ranged ? t.range : (t.aggro ?? AGGRO) + (now - z.hurtAt < 3000 ? 8 : 0);
   for (const p of room.targets()) { // players and survivors
     if (!p.alive || p.downed) continue;
-    const pp = p.st.p, d = Math.hypot(pp[0] - pos[0], pp[2] - pos[2]);
+    const pp = p.st.p, raw = Math.hypot(pp[0] - pos[0], pp[2] - pos[2]);
+    const d = p.isSurvivor && p.cls === 'guardian' ? raw * SURVIVOR_CLASSES.guardian.aggroMult : raw; // Guardians draw zombies
     if (d >= bd) continue;
     if (!t.ranged && !room.lineOfSight(eye, [pp[0], pp[1] + 1.4, pp[2]])) continue;
     best = p;
@@ -73,20 +75,39 @@ function step(room, z, dt, now, hash) {
     z.nextAtk = Math.max(z.nextAtk, z.frozenUntil + 300);
     return;
   }
-  if (z.knock) { // thrown back by a Shockwave Blaster: slides (and stops against walls)
-    if (now >= z.knock.until) z.knock = null;
+  if (z.knock) { // flung by a Shockwave Blaster (or pulled/pushed by a boss weapon perk): flies until it
+    const kn = z.knock, elapsed = (now - kn.t0) / 1000, remain = kn.dist - kn.traveled; // hits something solid or runs out of distance
+    if (remain <= 0.03 || elapsed > 3) z.knock = null;
     else {
-      const k = 1 - (z.knock.until - now) / 450;
-      z.vel[0] = z.knock.vx * (1 - k * 0.6); z.vel[2] = z.knock.vz * (1 - k * 0.6);
+      const speed = kn.speed0 * (1 - 0.3 * Math.min(1, elapsed / 1.2)), step = Math.min(speed * dt, remain);
+      z.vel[0] = (kn.ux * step) / dt; z.vel[2] = (kn.uz * step) / dt;
       z.vel[1] -= P.gravity * dt;
+      const bx = pos[0], bz = pos[2];
       z.g = moveCharacter(pos, z.vel, dt, 1.8 * z.s, room.grid.query(pos[0] - 2, pos[2] - 2, pos[0] + 2, pos[2] + 2, nearBoxes), z.g);
+      const moved = Math.hypot(pos[0] - bx, pos[2] - bz);
+      kn.traveled += moved;
+      if (step > 0.03 && moved < step * 0.4) { // hit something solid: a slam, unless the perk that threw it says otherwise
+        if (!kn.noSlam) {
+          const frac = Math.max(0.4, speed / kn.speed0);
+          room.damageZombie(z, Math.round((35 + kn.dmgHit * 0.45) * frac), room.players.find(pl => pl.id === kn.by) ?? null, 'kinetic');
+          z.stunUntil = now + 1000;
+          room.broadcast({ t: 'slam', p: [Math.round(pos[0] * 100) / 100, Math.round(pos[1] * 100) / 100, Math.round(pos[2] * 100) / 100] });
+        }
+        z.knock = null;
+      } else if (kn.traveled >= kn.dist - 0.03) z.knock = null;
       if (pos[1] < -4) room.removeZombie(z, true);
-      return;
+      if (z.knock) return; // still flying
     }
+  }
+  if (now < (z.stunUntil || 0)) { // stunned (just slammed, or the Alpha Cleaver's knockdown): no moving or attacking
+    z.vel[0] = z.vel[2] = 0;
+    z.state = ZS.MOVE;
+    z.target = null;
+    z.nextAtk = Math.max(z.nextAtk, z.stunUntil + 200);
+    return;
   }
   if (z.mount) return room.bosses.stepRider(z, dt, now); // riding the Brood Titan
   if (t.sniper) return stepSniper(room, z, dt, now);
-  if (t.flyer) return stepFlyer(room, z, dt, now);
   if (now >= z.thinkAt) { z.thinkAt = now + 200 + Math.random() * 150; think(room, z, now); }
 
   let goal = null, attack = null, face = null;
@@ -112,7 +133,7 @@ function step(room, z, dt, now, hash) {
     if (!attack && !goal && !face) { // head for the Core (Spitters too, until something is in range)
       if (distToBox(body, room.coreBase) <= t.reach) attack = { kind: 'c' };
       else {
-        const st = room.flow.step(pos[0], pos[2]);
+        const st = t.breaker ? room.flow.bstep(pos[0], pos[2]) : room.flow.step(pos[0], pos[2]);
         if (st) {
           // only smash the piece the path goes through, not ones it merely walks past
           const s = st.sid >= 0 ? room.pieces.get(st.sid) : null;
@@ -195,17 +216,31 @@ function strike(room, z) {
   if (!a) return;
   if (t.stomp) { // the Titan's stomp flattens everything around its feet
     for (const p of room.targets()) if (p.alive && !p.downed && Math.hypot(p.st.p[0] - z.pos[0], p.st.p[2] - z.pos[2]) <= t.stomp && p.st.p[1] - z.pos[1] < 3) room.hurtPlayer(p, t.dmg * mul, z);
-    for (const s of room.builds()) if (distToBox([z.pos[0], z.pos[1] + 1, z.pos[2]], s.box) <= t.stomp) room.damagePiece(s, t.sdmg * mul * 0.5);
+    for (const s of room.builds()) if (distToBox([z.pos[0], z.pos[1] + 1, z.pos[2]], s.box) <= t.stomp) room.damagePiece(s, t.sdmg * mul * 0.5, z);
     room.broadcast({ t: 'stomp', p: [Math.round(z.pos[0] * 100) / 100, 0, Math.round(z.pos[2] * 100) / 100], r: t.stomp });
-    if (a.kind === 'c') room.damageCore(t.sdmg * mul, z); else if (a.kind === 's' && room.pieces.get(a.ref.id) === a.ref) room.damagePiece(a.ref, t.sdmg * mul);
+    if (a.kind === 'c') room.damageCore(t.sdmg * mul, z); else if (a.kind === 's' && room.pieces.get(a.ref.id) === a.ref) room.damagePiece(a.ref, t.sdmg * mul, z);
     return;
   }
   if (a.kind === 'p') {
     const p = a.ref, pp = p.st.p, dh = Math.hypot(pp[0] - z.pos[0], pp[2] - z.pos[2]), dy = pp[1] - z.pos[1];
     if (p.alive && !p.downed && dh <= t.reach + 0.5 && dy > -1.2 && dy < 1.8 * z.s) { room.hurtPlayer(p, t.dmg * mul, z); onMeleeHit(room, z, p); }
   } else if (a.kind === 's') {
-    if (room.pieces.get(a.ref.id) === a.ref) room.damagePiece(a.ref, t.sdmg * mul);
-  } else room.damageCore(t.sdmg * mul, z);
+    if (room.pieces.get(a.ref.id) === a.ref) {
+      room.damagePiece(a.ref, t.sdmg * mul, z);
+      if (t.breaker) {
+        breakerSplash(room, a.ref, t.sdmg * mul, z); // smashes through: 40% splash to nearby pieces, no reductions
+        const c = boxCenter(a.ref.box);
+        room.broadcast({ t: 'gsmash', p: [Math.round(c[0] * 100) / 100, Math.round(c[1] * 100) / 100, Math.round(c[2] * 100) / 100] });
+      }
+    }
+  } else room.damageCore(t.cdmg ?? t.sdmg * mul, z); // Core Seeker: a fixed amount per hit, unscaled by wave difficulty
+}
+
+// Wall breakers (Iron Golem): the piece it hits takes full sdmg; other pieces within range take 40% of that,
+// also unreduced.
+function breakerSplash(room, hit, dmg, z) {
+  const c = boxCenter(hit.box), splash = dmg * 0.4;
+  for (const s of room.pieces.values()) if (s !== hit && distToBox(c, s.box) <= 2.5) room.damagePiece(s, splash, z);
 }
 
 // Acid glob on a ballistic arc toward where the target is now.

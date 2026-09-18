@@ -1,11 +1,10 @@
-// Fragline server: serves the browser client and runs 1v1 rooms over WebSockets.
+// Fragline server: serves the browser client and runs Zombie Holdout rooms over WebSockets.
 import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { Room } from './server/room.js';
 import { HoldoutRoom } from './server/holdout/room.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -75,26 +74,24 @@ wss.on('connection', ws => {
       const code = String(m.code || '').toUpperCase().trim();
       const r = rooms.get(code);
       if (!r) return fail(`Room ${code || '(blank)'} not found`);
-      if (r.isFull() || r.vsBot) return fail(`Room ${code} is full`);
+      if (r.isFull()) return fail(`Room ${code} is full`);
       room = r;
     } else if (m.mode === 'quick') {
       room = [...rooms.values()].find(r => r.public && !r.isFull());
-      if (!room) { room = new Room(newCode()); room.public = true; rooms.set(room.code, room); }
+      if (!room) { room = new HoldoutRoom(newCode()); room.public = true; rooms.set(room.code, room); }
     } else {
-      const gameMode = m.mode === 'create' ? m.gameMode : 'classic';
-      room = gameMode === 'zombies' ? new HoldoutRoom(newCode(), { diff: m.diff })
-        : new Room(newCode(), { bot: m.mode === 'bot', diff: m.diff, gameMode });
+      room = new HoldoutRoom(newCode());
       rooms.set(room.code, room);
     }
     player = room.addPlayer(ws, name);
-    console.log(`[${room.code}] ${name} joined (${room.players.length}/${room.maxPlayers ?? 2}${room.vsBot ? ', vs bot' : ''})`);
+    console.log(`[${room.code}] ${name} joined (${room.players.length}/${room.maxPlayers})`);
   });
 
   ws.on('close', () => {
     if (!room || !player) return;
     room.removePlayer(player);
     console.log(`[${room.code}] ${player.name} left`);
-    if (!room.players.some(p => !p.bot)) rooms.delete(room.code);
+    if (!room.players.length) rooms.delete(room.code);
   });
 });
 
