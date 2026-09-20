@@ -4,7 +4,7 @@
 // chest, shop, boss bar, revive / use rings, name tags and the end-of-match report. The server is authoritative.
 import * as THREE from 'three';
 import { OUTPOST, OUTPOST_STATIC, CORE_LADDERS } from '/shared/outpost.js';
-import { BMATS, REACH, distToBox } from '/shared/build.js';
+import { BMATS, MAT_IDS, REACH, distToBox } from '/shared/build.js';
 import { WAVES } from '/shared/zombies.js';
 import { WEAPONS } from '/shared/weapons.js';
 import { RARITY, AMMO, ITEMS, POWERUPS, BUFF, THROWABLES, HEALS, SURVIVOR, SURVIVOR_CLASSES, ARMOR, CLASSES, SMITH, CORE_UP_IDS } from '/shared/holdout.js';
@@ -14,7 +14,7 @@ import { rayWorld, blocked, bodyHeight, topAt, dirFromAngles } from '/shared/phy
 import { ZombieView } from './zombies.js';
 import { Structures, Nodes, BuildMode, EditMode } from './build.js';
 import { Entities } from './holdout_ents.js';
-import { Props } from './props.js';
+import { Props, Decor } from './props.js';
 import { NightFx } from './night.js';
 import { hotbarHTML, buyHTML, smithHTML, bankHTML, saveRecord, recordText } from './holdout_ui.js';
 import { InventoryUI } from './inventory_ui.js';
@@ -29,6 +29,7 @@ const LANE_NAME = { N: 'NORTH', E: 'EAST', S: 'SOUTH', W: 'WEST' };
 const LANE_POS = Object.fromEntries(OUTPOST.lanes.map(l => [l.id, [(l.zone[0] + l.zone[2]) / 2, (l.zone[1] + l.zone[3]) / 2]]));
 const GLOB_GRAVITY = 12; // matches server/holdout/ai.js
 const PIECE_NAME = { wall: 'WALL', floor: 'FLOOR', ramp: 'STAIR', trap: 'TRAP', deploy: 'DEPLOY' };
+const ZINK_TINT = 0x8fc9bf; // Zinkonium's pale blue-green — harvest sparks and bursts
 const SB_HOLDOUT = '<tr><th>PLAYER</th><th>KILLS</th><th>DMG</th><th>BUILDS</th><th>REPAIRED</th><th>REVIVES</th><th>RESCUES</th><th>PING</th></tr>';
 const POWER_BUFF = { p_damage: 'damage', p_rapid: 'rate', p_barrier: 'barrier' };
 const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -63,6 +64,7 @@ export class Holdout {
     this.nodes = new Nodes(game.world.scene);
     this.structs = new Structures(game.world.scene, () => this.refreshBoxes());
     this.props = new Props(game.world.scene);
+    this.decor = new Decor(game.world.scene); // cosmetic clutter only — no collision, never resets mid-match
     this.nightFx = new NightFx(game);
     this.nightK = 0;
     this.flashOn = false;
@@ -80,7 +82,7 @@ export class Holdout {
     this.globMat = new THREE.MeshBasicMaterial({ color: 0x9dff3d });
     this.bombMat = new THREE.MeshBasicMaterial({ color: 0xff4fd8 });
     this.phys = { ladders: CORE_LADDERS };
-    this.mats = { wood: 0, stone: 0, metal: 0 };
+    this.mats = Object.fromEntries(MAT_IDS.map(m => [m, 0]));
     this.ammo = {};
     this.items = {};                              // item id -> how many you carry (summed over the grid)
     this.inv = Array(INV_SIZE).fill(null);         // 0-5 hotbar, 6-23 backpack
@@ -88,7 +90,7 @@ export class Holdout {
     this.armor = Object.fromEntries(ARMOR_SLOTS.map(s => [s, null]));
     this.cls = null;
     this.maxHp = 200;
-    this.stash = { money: 0, mats: { wood: 0, stone: 0, metal: 0 }, ammo: {}, items: [] };
+    this.stash = { money: 0, mats: Object.fromEntries(MAT_IDS.map(m => [m, 0])), ammo: {}, items: [] };
     Object.assign(this, {
       phase: 'lobby', wave: 0, waves: WAVES, core: [1, 1], lanes: [], next: [], left: 0, end: 0, diff: welcome.diff || 'normal',
       downed: false, bleedEnd: 0, respawnAt: 0, roster: [], reviveId: null, reviveStart: 0, lastInteract: 0,
@@ -176,7 +178,7 @@ export class Holdout {
       }
       case 'sedit': { const p = this.structs.edit(m.id, m.mask); if (p) { this.pieceSound(p, 'build', 0.4); this.unstick(p.box); } return; }
       case 'node': if (this.nodes.setHp(m.id, m.hp)) this.refreshBoxes(); return;
-      case 'harv': return this.feed(`+${m.n} ${m.mat.toUpperCase()}${m.weak ? ' · WEAK POINT!' : ''}`, m.mat);
+      case 'harv': return this.feed(`+${m.n} ${BMATS[m.mat].name.toUpperCase()}${m.weak ? ' · WEAK POINT!' : ''}`, m.mat);
       case 'zsp': for (const z of m.z) this.zombies.spawn(z, now); return;
       case 'zdie': return this.onZombieDied(m);
       case 'zclear': this.zombies.clear(); this.clearGlobs(); return;
@@ -194,6 +196,7 @@ export class Holdout {
       case 'pk': for (const t of m.l) this.ents.addPickup(t); return;
       case 'pkall': this.ents.clearPickups(); for (const t of m.l) this.ents.addPickup(t); return;
       case 'pkdel': this.ents.removePickup(m.id); return;
+      case 'pkfall': for (const [id, y] of m.l) this.ents.fallPickup(id, y); return;
       case 'stash': this.stash = m.s; if (this.g.ui === 'bag') this.renderBag(); if (this.g.ui === 'buy') this.renderBuy(); return;
       case 'chests': return this.ents.setChests(m.l);
       case 'opened': this.g.sound.play('chest_chime', { pos: [m.x, 0.6, m.z], vol: 1, rate: 1.3 }); this.world.burst([m.x, 0.8, m.z], [0, 1, 0], 0xffd65a, 20, 4); return;
@@ -216,6 +219,7 @@ export class Holdout {
       case 'zshot': this.g.world.tracer(m.a, m.b, 0xff4040); this.g.sound.play('shot_awp', { pos: m.a, vol: 1.3, ref: 12, roll: 0.6 }); return;
       case 'zdig': return this.ents.dig(m);
       case 'zup': this.world.burst(m.p, [0, 1, 0], 0x6b5237, 30, 5); this.g.sound.play('break_S', { pos: m.p, vol: 1, ref: 4 }); this.shake = Math.max(this.shake, 0.4); return;
+      case 'hoardcash': this.world.burst(m.p, [0, 1, 0], 0xffd700, 40, 6); this.g.sound.play('cash', { pos: m.p, vol: 1 }); this.g.hud.banner('HOARDER DOWN', `+$${m.amt} for the squad!`, 'win', 3500); return;
       case 'hz': return this.ents.addHazard(m);
       case 'maw': this.onMaw(m); return;
       case 'thump': return this.ents.setThumpers(m.l);
@@ -417,7 +421,7 @@ export class Holdout {
 
   // map props: wood planks/crates sound like wood, roofs like metal, concrete like stone
   propSound(p, vol, prefix = 'hit_') {
-    const c = [0, 1, 2].map(i => (p.box.min[i] + p.box.max[i]) / 2), code = { w: 'W', d: 'W', h: 'M', c: 'S' }[p.box.mat] ?? 'S';
+    const c = [0, 1, 2].map(i => (p.box.min[i] + p.box.max[i]) / 2), code = { w: 'W', d: 'W', h: 'Z', c: 'S' }[p.box.mat] ?? 'S';
     this.g.sound.play(prefix + code, { pos: c, vol, ref: 3, roll: 1.1, muffle: this.g.occluded(c) ? 1400 : 0 });
   }
 
@@ -453,6 +457,7 @@ export class Holdout {
   }
 
   onZombieDied(m) {
+    if (m.silent) { this.zombies.remove(m.id); return; } // Hoarder finishing its escape: just gone, no death fx
     const killer = m.by === this.g.me.id ? this.g.player.pos : this.g.remotes.get(m.by)?.pos;
     const zb0 = this.zombies.list.get(m.id);
     const dir = killer && zb0 ? [zb0.pos[0] - killer[0], 0, zb0.pos[2] - killer[2]] : null;
@@ -476,6 +481,17 @@ export class Holdout {
       if (zb.type === 'swooper') this.g.sound.play('brute_roar', { pos, vol: 1, ref: 6, rate: 1.8 }); // screech: locked onto a target, diving in a beat
       else if ((zb.type === 'brute' || zb.type === 'alpha') && Math.random() < 0.5) this.g.sound.play('brute_roar', { pos, vol: 1.2, ref: 4, rate: zb.type === 'alpha' ? 0.8 : 1 });
       else this.g.sound.play('z_swipe', { pos, vol: 0.9, ref: 2.5, rate: 0.9 + Math.random() * 0.25 });
+    }
+  }
+
+  // Hoarders leave a trail of gold dust as they sprint for the Core — hard to miss, easy to follow.
+  hoarderTrail(dt) {
+    for (const zb of this.zombies.list.values()) {
+      if (zb.dead || zb.type !== 'hoarder') continue;
+      zb.trailAt = (zb.trailAt ?? 0) - dt;
+      if (zb.trailAt > 0) continue;
+      zb.trailAt = 0.08;
+      this.world.burst([zb.pos[0], zb.pos[1] + 0.3, zb.pos[2]], [0, 1, 0], 0xffd700, 2, 1.2);
     }
   }
 
@@ -601,10 +617,10 @@ export class Holdout {
     const hit = rayWorld(eye, dir, reach, [...this.nodes.boxes, ...this.props.boxes]);
     if (hit?.box.prop) {
       if (this.phase === 'lobby' || this.phase === 'countdown') { this.say('Wait for the game to start before breaking things'); return false; }
-      const mat = this.props.matOf(hit.box.sid), p = eye.map((v, j) => v + dir[j] * hit.t);
+      const p = eye.map((v, j) => v + dir[j] * hit.t);
       this.g.net.send({ t: 'harvest', prop: hit.box.sid });
-      this.g.sound.play('chop_' + mat, { vol: 0.8, rate: 0.9 + Math.random() * 0.2 });
-      this.world.burst(p, hit.n, mat === 'wood' ? 0x9c6a3a : mat === 'stone' ? 0xcfc9bd : 0xffd27a, 6, 2.5);
+      this.g.sound.play('chop_zink', { vol: 0.8, rate: 0.9 + Math.random() * 0.2 });
+      this.world.burst(p, hit.n, ZINK_TINT, 6, 2.5);
       return true;
     }
     if (!hit || hit.box.node === undefined) return false;
@@ -615,10 +631,9 @@ export class Holdout {
     if (nodes.weakNode === n.id && nodes.weak.visible) weak = nodes.weak.position.distanceTo(_v.set(...p)) < 0.45;
     if (weak || nodes.weakNode !== n.id) nodes.placeWeak(n, eye);
     this.g.net.send({ t: 'harvest', id: n.id, weak });
-    const mat = { tree: 'wood', crate: 'wood', pallet: 'wood', rock: 'stone', rubble: 'stone' }[n.type] ?? 'metal';
-    this.g.sound.play(weak ? 'weak_hit' : 'chop_' + mat, { vol: 0.8, rate: 0.9 + Math.random() * 0.2 });
-    if (weak) this.g.sound.play('chop_' + mat, { vol: 0.6 });
-    this.world.burst(p, hit.n, mat === 'wood' ? 0x9c6a3a : mat === 'stone' ? 0xcfc9bd : 0xffd27a, weak ? 12 : 6, 2.5);
+    this.g.sound.play(weak ? 'weak_hit' : 'chop_zink', { vol: 0.8, rate: 0.9 + Math.random() * 0.2 });
+    if (weak) this.g.sound.play('chop_zink', { vol: 0.6 });
+    this.world.burst(p, hit.n, ZINK_TINT, weak ? 12 : 6, 2.5);
     return true;
   }
 
@@ -960,7 +975,7 @@ export class Holdout {
   }
 
   renderSmith() {
-    $('smithMoney').textContent = `$${this.g.me.money} · metal ${this.mats.metal || 0}`;
+    $('smithMoney').textContent = `$${this.g.me.money} · zinkonium ${this.mats.zink || 0}`;
     $('smithGrid').innerHTML = smithHTML(this);
     for (const b of $('smithGrid').querySelectorAll('button')) {
       b.onclick = () => {
@@ -1033,6 +1048,7 @@ export class Holdout {
   update(dt) {
     const g = this.g, now = g.now, pnow = performance.now() / 1000;
     this.zombies.update(dt, pnow, { pos: g.player.pos, nightK: this.nightK, nvK: this.nvK });
+    this.hoarderTrail(dt);
     this.updateShades(now);
     const people = [g.player.pos, ...[...g.remotes.values()].map(r => r.pos), ...[...this.ents.survivors.values()].map(s => s.pos)];
     this.structs.tick(dt, people);
@@ -1151,7 +1167,7 @@ export class Holdout {
       return `${g.deathMsg} — you're out until wave ${this.wave} is cleared${who ? ` · watching ${who.name} (click to switch)` : ''}`;
     }
     if (this.downed) return `DOWNED — bleeding out in ${Math.max(0, Math.ceil(this.bleedEnd - now))}s · a teammate can hold E to revive you`;
-    if (this.edit.active) return `EDIT (${this.edit.describe()}) · click/drag tiles · V confirm · right-click reset`;
+    if (this.edit.active) return `EDIT (${this.edit.describe()}) · drag tiles, release to apply · V done · right-click reset`;
     const b = this.build;
     if (b.active) {
       const p = b.aimedPiece();
@@ -1186,9 +1202,7 @@ export class Holdout {
     const berserkSoon = ph === 'wave' && waveLeft > 0 && waveLeft <= 60; // last minute: show the clock instead of the zombie count
     setText('hoTimer', berserkSoon ? fmt(waveLeft) : ph === 'wave' ? String(this.left) : ph === 'lobby' ? '—' : fmt(left));
     setText('hoLeft', berserkSoon ? 'TILL BERSERK' : ph === 'wave' ? 'ZOMBIES LEFT' : ph === 'lobby' ? 'NO TIMER' : ph === 'countdown' ? 'STARTING' : ph === 'prep' ? 'UNTIL WAVE 1' : ph === 'intermission' ? 'UNTIL NEXT WAVE' : 'NEXT MATCH');
-    setText('matWood', this.mats.wood);
-    setText('matStone', this.mats.stone);
-    setText('matMetal', this.mats.metal);
+    setText('matZink', this.mats.zink);
     setHTML('hotbar', hotbarHTML(this));
     const flash = this.hasFlashlight();
     setHidden('hoFlash', !flash);
@@ -1239,8 +1253,8 @@ export class Holdout {
     if (b.active) {
       const binds = g.hud.settings.binds, k = id => keyName(binds[id]?.[0]);
       setHTML('buildBar', [['wall', 'bWall'], ['floor', 'bFloor'], ['ramp', 'bStair'], ['trap', 'bTrap'], ['deploy', 'bDeploy']].map(([k2, id]) => `<span class="${b.kind === k2 ? 'on' : ''}"><b>${k(id)}</b>${PIECE_NAME[k2]}</span>`).join('') +
-        (b.placing ? `<span class="on"><b>⟳</b>${esc(ITEMS[b.item]?.name ?? 'NONE')} ×${this.items[b.item] || 0}</span>` : `<span class="mat ${b.mat} on"><b>⟳</b>${b.mat.toUpperCase()} ${this.mats[b.mat]}</span>`) +
-        `<small>LMB place (hold) · RMB upgrade · ${k('bRotate')} rotate stair · wheel ${b.placing ? 'type' : 'material'} · X demolish · V edit · G exit</small>`);
+        (b.placing ? `<span class="on"><b>⟳</b>${esc(ITEMS[b.item]?.name ?? 'NONE')} ×${this.items[b.item] || 0}</span>` : `<span class="mat ${b.mat} on">${BMATS[b.mat].name.toUpperCase()} ${this.mats[b.mat]}</span>`) +
+        `<small>LMB place (hold) · ${k('bRotate')} rotate stair${b.placing ? ' · wheel type' : ''} · X demolish · V edit · G exit</small>`);
     }
     // progress ring: reviving, holding E, using an item, or bleeding out
     let ring = null;
@@ -1288,6 +1302,7 @@ export class Holdout {
     for (const p of this.minimap.pings) put(bearing(pl.pos, p.x, p.z), 'ping', '◆');
     for (const s of this.ents.survivors.values()) if (s.state === 0) put(bearing(pl.pos, s.pos[0], s.pos[2]), 'svm', '✚');
     for (const zb of this.zombies.list.values()) if (!zb.dead && zb.type === 'seeker') put(bearing(pl.pos, zb.pos[0], zb.pos[2]), 'seeker', '▲');
+    for (const zb of this.zombies.list.values()) if (!zb.dead && zb.type === 'hoarder') put(bearing(pl.pos, zb.pos[0], zb.pos[2]), 'hoarder', '$');
     for (const p of this.roster) {
       const r = p.id !== this.g.me.id && this.g.remotes.get(p.id);
       if (r) put(bearing(pl.pos, r.pos[0], r.pos[2]), p.downed ? 'mate down' : 'mate', '●');
@@ -1351,6 +1366,8 @@ export class Holdout {
       if (zb.dead) continue;
       if (zb.type === 'golem' && Math.hypot(zb.pos[0] - me[0], zb.pos[2] - me[2]) < 40) show('zg' + zb.id, [zb.pos[0], zb.pos[1] + 2.7 * zb.s, zb.pos[2]], 'WALL BREAKER', 'tag breaker');
       else if (zb.type === 'seeker' && Math.hypot(zb.pos[0] - me[0], zb.pos[2] - me[2]) < 45) show('zs' + zb.id, [zb.pos[0], zb.pos[1] + 2.2 * zb.s, zb.pos[2]], '!', 'tag seeker');
+      else if (zb.type === 'hoarder') show('zh' + zb.id, [zb.pos[0], zb.pos[1] + 2.4 * zb.s, zb.pos[2]], 'HOARDER', 'tag hoarder');
+      else if (zb.type === 'relic' && Math.hypot(zb.pos[0] - me[0], zb.pos[2] - me[2]) < 40) show('zr' + zb.id, [zb.pos[0], zb.pos[1] + 2.3 * zb.s, zb.pos[2]], 'RELIC BEARER', 'tag relic');
     }
     for (const [id, el] of this.tags) if (!seen.has(id)) { el.remove(); this.tags.delete(id); }
   }
@@ -1362,6 +1379,7 @@ export class Holdout {
     this.zombies.dispose();
     this.structs.dispose();
     this.props.dispose();
+    this.decor.dispose();
     this.nodes.dispose();
     this.build.dispose();
     this.edit.dispose();

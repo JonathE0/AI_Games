@@ -121,11 +121,11 @@ function shopCardHTML(id, h, money) {
 
 // ---------- UPGRADES tab: rarity + tier on everything you own ----------
 function tierBtnFor(it, h) {
-  const t = it.tier ?? 1, money = h.g.me.money, metal = h.mats.metal || 0;
+  const t = it.tier ?? 1, money = h.g.me.money, zink = h.mats.zink || 0;
   if (t >= 3) return btn('Tier III', {}, '', true);
   if (t === 2) return btn('Tier III — at the Blacksmith', {}, '', true);
   const c = tierCost(it, 2);
-  return btn(`Tier II $${c.money}`, { tierup: it.uid }, '', money < c.money || metal < c.metal);
+  return btn(`Tier II $${c.money}`, { tierup: it.uid }, '', money < c.money || zink < c.zink);
 }
 function upgradeGunRow(it, h, bankMoney) {
   const cost = rarityCost(it);
@@ -229,22 +229,22 @@ export function bankHTML(h) {
 
 // ---------- the Blacksmith ----------
 export function smithHTML(h) {
-  const money = h.g.me.money, metal = h.mats.metal || 0, rows = [];
+  const money = h.g.me.money, zink = h.mats.zink || 0, rows = [];
   const act = (label, data, ok = true, cls = '') => btn(label, data, cls, !ok);
   const guns = h.inv.filter(it => it?.kind === 'gun' && WEAPONS[it.id].cat !== 'melee');
   rows.push('<div class="smithCol"><h3>GUNS</h3>' + (guns.length ? guns.map(it => {
     const t = it.tier ?? 1, c = t < 3 ? tierCost(it, t + 1) : null;
-    const forge = c ? act(`Forge tier ${TIERS[t + 1].name} · $${c.money}${c.metal ? ` + ${c.metal} metal` : ''}`, { op: 'forge', uid: it.uid }, money >= c.money && metal >= c.metal) : '<span class="muted">tier III</span>';
-    const els = it.els ?? (it.el ? [it.el] : []), infuseMetal = SMITH.infuse.metal * (1 + els.length);
-    const infuse = ELEMENT_IDS.map(el => act(`${ELEMENTS[el].name} $${SMITH.infuse.money}+${infuseMetal}m`, { op: 'infuse', uid: it.uid, el }, !els.includes(el) && money >= SMITH.infuse.money && metal >= infuseMetal, `el ${el}${els.includes(el) ? ' on' : ''}`)).join('');
+    const forge = c ? act(`Forge tier ${TIERS[t + 1].name} · $${c.money}${c.zink ? ` + ${c.zink} Zinkonium` : ''}`, { op: 'forge', uid: it.uid }, money >= c.money && zink >= c.zink) : '<span class="muted">tier III</span>';
+    const els = it.els ?? (it.el ? [it.el] : []), infuseZink = SMITH.infuse.zink * (1 + els.length);
+    const infuse = ELEMENT_IDS.map(el => act(`${ELEMENTS[el].name} $${SMITH.infuse.money}+${infuseZink}z`, { op: 'infuse', uid: it.uid, el }, !els.includes(el) && money >= SMITH.infuse.money && zink >= infuseZink, `el ${el}${els.includes(el) ? ' on' : ''}`)).join('');
     const fit = ATTACH_IDS.map(id => act(`${ATTACH[id].name} $${ATTACH[id].price}`, { op: 'fit', uid: it.uid, id }, it.att?.[ATTACH[id].slot] !== id && money >= ATTACH[id].price, it.att?.[ATTACH[id].slot] === id ? 'on' : '')).join('');
-    return `<div class="smithItem" style="--rc:${RARITY[it.r ?? 0].color}"><b>${esc(itemName(it))}</b><div>${forge}</div><div><small>Infuse — adds an element (money stays $${SMITH.infuse.money}, metal grows with each one already on it)</small>${infuse}</div><div><small>Attachments</small>${fit}</div></div>`;
+    return `<div class="smithItem" style="--rc:${RARITY[it.r ?? 0].color}"><b>${esc(itemName(it))}</b><div>${forge}</div><div><small>Infuse — adds an element (money stays $${SMITH.infuse.money}, Zinkonium grows with each one already on it)</small>${infuse}</div><div><small>Attachments</small>${fit}</div></div>`;
   }).join('') : '<span class="muted">No guns in your inventory</span>') + '</div>');
   const armor = [...ARMOR_SLOTS.map(s => h.armor[s]).filter(Boolean), ...h.inv.filter(it => it?.kind === 'armor')];
   const turrets = [...h.ents.defs.values()].filter(d => TURRET_TYPES.includes(d.type));
   rows.push('<div class="smithCol"><h3>ARMOR</h3>' + (armor.length ? armor.map(it => {
     const t = it.tier ?? 1, c = t < 3 ? tierCost(it, t + 1) : null;
-    return `<div class="smithItem" style="--rc:${TIER_COLORS[t]}"><b>${esc(itemName(it))}</b><div>${c ? act(`Forge tier ${TIERS[t + 1].name} · $${c.money}${c.metal ? ` + ${c.metal} metal` : ''}`, { op: 'forge', uid: it.uid }, money >= c.money && metal >= c.metal) : '<span class="muted">tier III</span>'}</div></div>`;
+    return `<div class="smithItem" style="--rc:${TIER_COLORS[t]}"><b>${esc(itemName(it))}</b><div>${c ? act(`Forge tier ${TIERS[t + 1].name} · $${c.money}${c.zink ? ` + ${c.zink} Zinkonium` : ''}`, { op: 'forge', uid: it.uid }, money >= c.money && zink >= c.zink) : '<span class="muted">tier III</span>'}</div></div>`;
   }).join('') : '<span class="muted">No armor</span>') +
     '<h3>TURRETS</h3>' + (turrets.length ? turrets.map((d, i) => `<div class="smithItem"><b>${ITEMS[d.type]?.name ?? d.type} #${i + 1}</b><div>${Object.entries(SMITH.turret).map(([up, u]) => {
       const lvl = d.mods?.[up] || 0, price = up === 'ammo' ? u.price : Math.round(u.price * 1.5 ** lvl);

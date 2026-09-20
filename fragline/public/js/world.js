@@ -13,11 +13,11 @@ const Z_AXIS = new THREE.Vector3(0, 0, 1);
 const MATS = {
   f: [0x9aa1a8, 'grid2', 2], b: [0xcfc8bb, 'grid4', 1], c: [0xdcd5c8, 'grid4', 1], m: [0x5d7e98, 'metal', 1.2],
   w: [0xc98f4e, 'crate', 0], p: [0xdcb47c, 'planks', 1.2], d: [0xece7de, 'drywall', 1.2], h: [0x97a9b8, 'metal', 0.8],
-  // Zombie Holdout builds
-  W: [0xc9955a, 'planks', 1.2], S: [0xa9a49b, 'stone', 1.2], M: [0x8d9aa6, 'plate', 1],
+  // Zombie Holdout builds: one material, Zinkonium — the old metal plate texture tinted pale blue-green
+  Z: [0x8fc9bf, 'plate', 1],
 };
-const DECAL = { w: 0x3b2410, p: 0x4a2f14, m: 0x2a2f36, h: 0x2a2f36, d: 0x6b655c, W: 0x4a2f14, S: 0x55524c, M: 0x2a2f36 };
-const DUST = { w: 0x9c6a3a, p: 0xb88a52, m: 0xffd27a, h: 0xffd27a, d: 0xf2eee6, W: 0xb88a52, S: 0xcfc9bd, M: 0xffd27a };
+const DECAL = { w: 0x3b2410, p: 0x4a2f14, m: 0x2a2f36, h: 0x2a2f36, d: 0x6b655c, Z: 0x2a2f36 };
+const DUST = { w: 0x9c6a3a, p: 0xb88a52, m: 0xffd27a, h: 0xffd27a, d: 0xf2eee6, Z: 0xffd27a };
 export const matColor = code => MATS[code]?.[0] ?? 0xffffff;
 export const matTile = code => MATS[code]?.[2] ?? 1;
 

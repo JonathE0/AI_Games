@@ -15,7 +15,7 @@ const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _v = new THREE.Vector3(), _s = new THREE.Vector3(), _c = new THREE.Color();
 const BLUEPRINT = new THREE.Color(0x8fd3ff), CHARRED = new THREE.Color(0x2a2520);
-const TEXNAME = { wood: 'planks', stone: 'stone', metal: 'plate' };
+const TEXNAME = { zink: 'plate' };
 const RAMP_YAW = [0, Math.PI, -Math.PI / 2, Math.PI / 2]; // rises toward +x, -x, +z, -z
 const TURN_ORDER = [0, 2, 1, 3];                           // ramp directions in 90° steps
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -344,7 +344,7 @@ export class BuildMode {
     this.h = holdout;
     this.active = false;
     this.kind = 'wall';     // wall | floor | ramp | trap | deploy
-    this.mat = 'wood';
+    this.mat = MAT_IDS[0];  // one material — Zinkonium
     this.pick = { trap: null, deploy: null }; // selected trap / deployable item id
     this.turn = 0;          // extra quarter turns for the next stair (R); resets after placing
     this.slot = null;
@@ -388,15 +388,11 @@ export class BuildMode {
     this.toggle(true);
   }
 
-  // wheel: materials for pieces, which trap / deployable when placing those
+  // wheel: which trap / deployable to place (one material, so there's nothing to cycle for walls/floors/ramps)
   cycle(dir) {
-    if (this.placing) {
-      const owned = this.owned(this.kind);
-      if (owned.length) this.pick[this.kind] = owned[(owned.indexOf(this.item) + dir + owned.length) % owned.length];
-    } else {
-      const i = MAT_IDS.indexOf(this.mat);
-      this.mat = MAT_IDS[(i + dir + MAT_IDS.length) % MAT_IDS.length];
-    }
+    if (!this.placing) return;
+    const owned = this.owned(this.kind);
+    if (owned.length) this.pick[this.kind] = owned[(owned.indexOf(this.item) + dir + owned.length) % owned.length];
     this.g.sound.play('tick', { vol: 0.4 });
   }
 
@@ -537,6 +533,7 @@ export class EditMode {
     this.piece = null;
     this.mask = 0;
     this.paint = null;
+    this.wasFiring = false;
     this.group = new THREE.Group();
     game.world.scene.add(this.group);
     this.keep = new THREE.MeshBasicMaterial({ color: 0x4dc3ff, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide });
@@ -558,6 +555,7 @@ export class EditMode {
     this.mask = p.mask | 0;
     this.active = true;
     this.paint = null;
+    this.wasFiring = false;
     this.buildTiles();
     this.g.sound.play('tick', { vol: 0.5 });
   }
@@ -604,7 +602,8 @@ export class EditMode {
     this.group.visible = true;
   }
 
-  // firing = fire button held: the first tile clicked decides whether the drag cuts or restores
+  // firing = fire button held: the first tile clicked decides whether the drag cuts or restores. Letting
+  // go applies whatever was dragged out right away — no second V press needed to send it.
   update(dt, firing) {
     if (!this.active) return;
     const p = this.piece, pl = this.g.player;
@@ -618,12 +617,22 @@ export class EditMode {
       if (this.paint === null) this.paint = !(this.mask & bit);
       const next = this.paint ? this.mask | bit : this.mask & ~bit;
       if (next !== this.mask && validMask(p.kind, next)) { this.mask = next; this.g.sound.play('tick', { vol: 0.25, rate: 1.4 }); }
-    } else if (!firing) this.paint = null;
+    } else if (!firing) {
+      if (this.wasFiring) this.commit();
+      this.paint = null;
+    }
+    this.wasFiring = firing;
     for (const m of this.group.children) m.material = m.userData.bit === this.hover ? this.hot : this.mask & (1 << m.userData.bit) ? this.cut : this.keep;
   }
 
-  confirm() {
+  // Sends the current mask if it differs from the piece's last confirmed one — safe to call often (the
+  // server no-ops a resend of the same mask), so releasing the mouse and pressing V to leave both use it.
+  commit() {
     if (this.piece && this.mask !== (this.piece.mask | 0)) this.g.net.send({ t: 'edit', id: this.piece.id, mask: this.mask });
+  }
+
+  confirm() {
+    this.commit();
     this.stop();
   }
 

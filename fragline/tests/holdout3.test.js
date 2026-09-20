@@ -29,13 +29,13 @@ const mulberry32 = seed => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; le
 test('builds that lose their connection to the ground collapse', () => {
   const room = started(new HoldoutRoom('I', {}));
   const a = join(room, 'A'), p = a.player;
-  p.mats.wood = 500;
+  p.mats.zink = 500;
   p.st.p = [0, 0, -6];
-  room.handle(p, { t: 'build', kind: 'wall', ...tile(-4, -8), l: 0, o: 0, mat: 'wood' });
+  room.handle(p, { t: 'build', kind: 'wall', ...tile(-4, -8), l: 0, o: 0, mat: 'zink' });
   T += 200;
-  room.handle(p, { t: 'build', kind: 'wall', ...tile(-4, -8), l: 1, o: 0, mat: 'wood' });
+  room.handle(p, { t: 'build', kind: 'wall', ...tile(-4, -8), l: 1, o: 0, mat: 'zink' });
   T += 200;
-  room.handle(p, { t: 'build', kind: 'floor', ...tile(-4, -12), l: 1, mat: 'wood' }); // hangs off the upper wall
+  room.handle(p, { t: 'build', kind: 'floor', ...tile(-4, -12), l: 1, mat: 'zink' }); // hangs off the upper wall
   const [bottom, top, floor] = room.builds();
   assert.ok(bottom && top && floor, 'three pieces built');
   advance(room, 3000);
@@ -57,9 +57,9 @@ test('everything on the map breaks except the Core: props take hits, give materi
   p.st.p = [(b.min[0] + b.max[0]) / 2, 0, b.max[2] + 1];
   if (b.max[2] - b.min[2] > b.max[0] - b.min[0]) p.st.p = [b.max[0] + 1, 0, (b.min[2] + b.max[2]) / 2];
   p.st.w = 'knife';
-  const wood = p.mats.wood;
+  const zink = p.mats.zink;
   room.handle(p, { t: 'harvest', prop: wall.id });
-  assert.ok(p.mats.wood > wood, 'harvesting a wall gives wood');
+  assert.ok(p.mats.zink > zink, 'harvesting a wall gives Zinkonium');
   assert.ok(wall.hp < wall.maxHp);
   // guns chip props (validated against the prop's box)
   p.inv[1] = makeGun('ar');
@@ -288,7 +288,7 @@ test('elements: fire burns, water soaks, ice freezes soaked zombies, shock arcs;
   p.st.p = [0, 0, -3];
   const FAKE = { dmg: 10, cone: 120, blastRange: 9 };
   // a zombie flung at a built wall stops at the wall, takes slam damage and is stunned
-  room.addPiece({ kind: 'wall', ...tile(0, -16), l: 0, o: 0, mat: 'metal' }, null);
+  room.addPiece({ kind: 'wall', ...tile(0, -16), l: 0, o: 0, mat: 'zink' }, null);
   const walled = room.spawnZombie('runner', 'N', ''); walled.pos = [0, 0, -11]; walled.hp = walled.maxHp = 5000;
   room.blast(p, [0, 1.6, -3], [0, 0, -1], FAKE, 1);
   for (let t = 0; t < 4000 && walled.knock; t += 50) advance(room, 50, 50);
@@ -395,9 +395,9 @@ test('burrowers dig under a build once and surface a tile past it; shields block
   const room = started(new HoldoutRoom('W', {}));
   const a = join(room, 'A'), p = a.player;
   p.st.p = [40, 0, 40];
-  // a sealed metal ring around the Core
-  for (let x = -12; x < 12; x += 4) for (const zz of [-12, 12]) room.addPiece({ kind: 'wall', ...tile(x, zz), l: 0, o: 0, mat: 'metal' }, null);
-  for (let zz = -12; zz < 12; zz += 4) for (const x of [-12, 12]) room.addPiece({ kind: 'wall', ...tile(x, zz), l: 0, o: 1, mat: 'metal' }, null);
+  // a sealed Zinkonium ring around the Core
+  for (let x = -12; x < 12; x += 4) for (const zz of [-12, 12]) room.addPiece({ kind: 'wall', ...tile(x, zz), l: 0, o: 0, mat: 'zink' }, null);
+  for (let zz = -12; zz < 12; zz += 4) for (const x of [-12, 12]) room.addPiece({ kind: 'wall', ...tile(x, zz), l: 0, o: 1, mat: 'zink' }, null);
   advance(room, 7500);
   room.startWave(9); room.director.queue = [];
   for (const z of [...room.zombies.values()]) room.removeZombie(z);
@@ -509,14 +509,14 @@ test('Blacksmith: forges tier III, infuses, fits attachments and upgrades turret
   const gun = p.inv[1] = makeGun('ar');
   gun.tier = 2;
   p.money = 20000;
-  p.mats.metal = 200;
+  p.mats.zink = 200;
   p.st.p = [SMITH.x + 1, 0, SMITH.z];
   room.handle(p, { t: 'smith', op: 'forge', uid: gun.uid });
   assert.equal(gun.tier, 2, 'no Blacksmith before wave 7 is cleared');
   room.bosses.smith = true;
   room.handle(p, { t: 'smith', op: 'forge', uid: gun.uid });
   assert.equal(gun.tier, 3);
-  assert.equal(p.mats.metal, 140, 'tier III costs metal');
+  assert.equal(p.mats.zink, 140, 'tier III costs Zinkonium');
   room.handle(p, { t: 'smith', op: 'infuse', uid: gun.uid, el: 'ice' });
   assert.equal(gun.el, 'ice');
   room.handle(p, { t: 'smith', op: 'fit', uid: gun.uid, id: 'flashlight' });
@@ -546,9 +546,9 @@ test('Blacksmith: forges tier III, infuses, fits attachments and upgrades turret
 test('game over resets the whole map: builds, traps, loot, props, trees and effects from the last match are gone', () => {
   const room = started(new HoldoutRoom('R', {}));
   const a = join(room, 'A'), p = a.player;
-  p.mats.wood = 500;
+  p.mats.zink = 500;
   p.st.p = [0, 0, -6];
-  room.handle(p, { t: 'build', kind: 'wall', ...tile(-4, -8), l: 0, o: 0, mat: 'wood' });
+  room.handle(p, { t: 'build', kind: 'wall', ...tile(-4, -8), l: 0, o: 0, mat: 'zink' });
   assert.equal(room.builds().length, 1);
   const prop = [...room.props.values()][0];
   prop.hp = 10;

@@ -6,17 +6,16 @@ export const GRID = { cell: 4, level: 3, thick: 0.3, x0: -48, z0: -48, cols: 24,
 export const FLOOR_LIFT = 0.01;     // floors sit flush with their level line, poking up just this much
 export const REACH = 7;             // max distance from your eye to the nearest point of the piece
 export const PIECE_COST = 10;
-export const REPAIR_HP_PER_MAT = 10;
+export const REPAIR_HP_PER_MAT = 15;
 export const START_FRAC = 0.1;      // pieces appear at 10 % HP and grow to full while building
 export const REFUND = 5;            // materials back when you demolish your own piece
 export const RAMP_THICK = 0.4;      // vertical thickness of a build ramp slab (~0.32 m perpendicular at this slope)
 
+// The one Holdout build material — tough, no upgrade path.
 export const BMATS = {
-  wood: { id: 'wood', name: 'Wood', hp: 200, time: 2, code: 'W', next: 'stone' },
-  stone: { id: 'stone', name: 'Stone', hp: 400, time: 4, code: 'S', next: 'metal' },
-  metal: { id: 'metal', name: 'Metal', hp: 700, time: 7, code: 'M', next: null },
+  zink: { id: 'zink', name: 'Zinkonium', hp: 750, time: 4, code: 'Z', next: null },
 };
-export const MAT_IDS = ['wood', 'stone', 'metal'];
+export const MAT_IDS = ['zink'];
 export const KINDS = ['wall', 'floor', 'ramp'];
 // ramp orientation o -> the direction its surface rises toward (+x, -x, +z, -z)
 export const RAMP_DIRS = [{ axis: 0, dir: 1 }, { axis: 0, dir: -1 }, { axis: 2, dir: 1 }, { axis: 2, dir: -1 }];
@@ -174,7 +173,7 @@ export function distToBox(p, b) {
 
 // Everything that decides whether a piece may go down. w = {
 //   slots: Set/Map of taken slot keys, pieces: [piece boxes], statics: [map boxes], nodes: [harvest boxes],
-//   zombies: [{ x, y, z, s }], eye: [x,y,z] | null, mats: { wood, stone, metal } | null,
+//   zombies: [{ x, y, z, s }], eye: [x,y,z] | null, mats: { zink } | null,
 //   core: { x, z, box }, zone: build radius around the Core }
 // Returns null when the piece is allowed, otherwise a short reason for the HUD.
 export function checkPlacement(p, w) {
@@ -184,7 +183,7 @@ export function checkPlacement(p, w) {
   if (Math.hypot(c[0] - w.core.x, c[2] - w.core.z) > w.zone) return 'Outside the build zone';
   if (overlaps(b, w.core.box)) return 'Too close to the Core';
   if (w.eye && distToBox(w.eye, b) > REACH) return 'Too far away';
-  if (w.mats && (w.mats[p.mat] ?? 0) < PIECE_COST) return `Not enough ${p.mat}`;
+  if (w.mats && (w.mats[p.mat] ?? 0) < PIECE_COST) return `Not enough ${BMATS[p.mat].name}`;
   // eps smaller than FLOOR_LIFT so a flush floor's thin sliver still registers against ground-level statics
   for (const s of w.statics) if (s.mat !== 'f' && overlaps(b, s, 0.005)) return 'Blocked';
   for (const s of w.nodes) if (overlaps(b, s, 0.005)) return 'Blocked';

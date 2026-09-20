@@ -21,10 +21,10 @@ export class Blacksmith {
 
   item(p, uid) { return p.inv.find(it => it?.uid === uid) ?? ARMOR_SLOTS.map(s => p.armor[s]).find(it => it?.uid === uid) ?? null; }
 
-  pay(p, money, metal = 0) {
-    if (p.money < money || (p.mats.metal || 0) < metal) { this.room.send(p, { t: 'deny', text: `Needs $${money}${metal ? ` + ${metal} metal` : ''}` }); return false; }
+  pay(p, money, zink = 0) {
+    if (p.money < money || (p.mats.zink || 0) < zink) { this.room.send(p, { t: 'deny', text: `Needs $${money}${zink ? ` + ${zink} Zinkonium` : ''}` }); return false; }
     p.money -= money;
-    p.mats.metal -= metal;
+    p.mats.zink -= zink;
     return true;
   }
 
@@ -39,7 +39,7 @@ export class Blacksmith {
       if (!it || it.kind !== 'gun' || !ELEMENTS[m.el]) return;
       const els = it.els ?? (it.el ? [it.el] : []);
       if (els.includes(m.el)) return deny('Already infused with that');
-      if (!this.pay(p, SMITH.infuse.money, SMITH.infuse.metal * (1 + els.length))) return; // adds on: metal scales with what's already on it
+      if (!this.pay(p, SMITH.infuse.money, SMITH.infuse.zink * (1 + els.length))) return; // adds on: Zinkonium cost scales with what's already on it
       const next = [...els, m.el];
       it.el = next[0];
       it.els = next;

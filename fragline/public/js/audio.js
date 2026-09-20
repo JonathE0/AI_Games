@@ -175,15 +175,16 @@ const DEFS = {
   spit: [0.35, (c, o) => { noise(c, o, { dur: 0.22, gain: 0.8, type: 'bandpass', freq: 1800, freqEnd: 500, q: 2, attack: 0.02, seed: 84 }); tone(c, o, { dur: 0.15, gain: 0.3, freq: 300, freqEnd: 600 }); }],
   splat: [0.5, (c, o) => { noise(c, o, { dur: 0.3, gain: 1, freq: 900, freqEnd: 200, seed: 85 }); for (let i = 0; i < 4; i++) tone(c, o, { t: 0.05 + i * 0.07, dur: 0.06, gain: 0.2, freq: 500 + i * 170, freqEnd: 900 + i * 200 }); }],
   build: [0.25, (c, o) => { tone(c, o, { dur: 0.08, gain: 0.35, freq: 520, freqEnd: 880, type: 'triangle' }); noise(c, o, { dur: 0.06, gain: 0.5, type: 'bandpass', freq: 1600, q: 2, seed: 86 }); tone(c, o, { t: 0.06, dur: 0.1, gain: 0.25, freq: 1320 }); }],
+  // hit_W/S + break_W/S: map props' own physical sound (wood crates/walls, concrete) — independent of the
+  // Holdout build material. hit_Z/break_Z: the one Holdout build material, Zinkonium (also reused for metal
+  // roof props). break_S also plays for the Maw erupting from the ground (zup) — a generic heavy-earth crash.
   hit_W: [0.3, (c, o) => { noise(c, o, { dur: 0.12, gain: 0.9, type: 'bandpass', freq: 700, q: 1.5, seed: 87 }); tone(c, o, { dur: 0.14, gain: 0.7, freq: 150, freqEnd: 85 }); }],
   hit_S: [0.3, (c, o) => { noise(c, o, { dur: 0.08, gain: 1, type: 'bandpass', freq: 2200, q: 1.2, seed: 88 }); tone(c, o, { dur: 0.1, gain: 0.6, freq: 210, freqEnd: 120 }); noise(c, o, { t: 0.02, dur: 0.18, gain: 0.35, freq: 900, seed: 89 }); }],
-  hit_M: [0.5, (c, o) => { tone(c, o, { dur: 0.4, gain: 0.3, freq: 820, freqEnd: 790 }); tone(c, o, { dur: 0.3, gain: 0.22, freq: 1310 }); noise(c, o, { dur: 0.04, gain: 0.7, type: 'highpass', freq: 2500, seed: 90 }); tone(c, o, { dur: 0.1, gain: 0.5, freq: 160, freqEnd: 90 }); }],
+  hit_Z: [0.5, (c, o) => { tone(c, o, { dur: 0.4, gain: 0.3, freq: 820, freqEnd: 790 }); tone(c, o, { dur: 0.3, gain: 0.22, freq: 1310 }); noise(c, o, { dur: 0.04, gain: 0.7, type: 'highpass', freq: 2500, seed: 90 }); tone(c, o, { dur: 0.1, gain: 0.5, freq: 160, freqEnd: 90 }); }],
   break_W: [0.8, (c, o) => { for (let i = 0; i < 5; i++) noise(c, o, { t: i * 0.06, dur: 0.15, gain: 0.9 - i * 0.12, type: 'bandpass', freq: 600 + i * 150, q: 1.3, seed: 91 + i }); tone(c, o, { dur: 0.3, gain: 0.7, freq: 110, freqEnd: 50 }); }],
   break_S: [0.9, (c, o) => { noise(c, o, { dur: 0.7, gain: 1, freq: 1400, freqEnd: 200, seed: 96 }); for (let i = 0; i < 6; i++) noise(c, o, { t: 0.05 + i * 0.08, dur: 0.05, gain: 0.5, type: 'bandpass', freq: 2500 - i * 200, q: 3, seed: 97 + i }); tone(c, o, { dur: 0.35, gain: 0.7, freq: 90, freqEnd: 40 }); }],
-  break_M: [1.1, (c, o) => { tone(c, o, { dur: 0.9, gain: 0.35, freq: 640, freqEnd: 420 }); tone(c, o, { dur: 0.7, gain: 0.25, freq: 1010, freqEnd: 700 }); noise(c, o, { dur: 0.5, gain: 0.8, type: 'bandpass', freq: 1800, freqEnd: 500, q: 1, seed: 103 }); tone(c, o, { dur: 0.3, gain: 0.7, freq: 120, freqEnd: 50 }); }],
-  chop_wood: [0.25, (c, o) => { tone(c, o, { dur: 0.1, gain: 0.8, freq: 240, freqEnd: 150, type: 'triangle' }); noise(c, o, { dur: 0.08, gain: 0.8, type: 'bandpass', freq: 1100, q: 2, seed: 104 }); }],
-  chop_stone: [0.25, (c, o) => { noise(c, o, { dur: 0.06, gain: 1, type: 'bandpass', freq: 2600, q: 2, seed: 105 }); tone(c, o, { dur: 0.08, gain: 0.5, freq: 380, freqEnd: 260 }); }],
-  chop_metal: [0.45, (c, o) => { tone(c, o, { dur: 0.35, gain: 0.35, freq: 1180, freqEnd: 1150 }); tone(c, o, { dur: 0.25, gain: 0.25, freq: 1770 }); noise(c, o, { dur: 0.03, gain: 0.8, type: 'highpass', freq: 3000, seed: 106 }); }],
+  break_Z: [1.1, (c, o) => { tone(c, o, { dur: 0.9, gain: 0.35, freq: 640, freqEnd: 420 }); tone(c, o, { dur: 0.7, gain: 0.25, freq: 1010, freqEnd: 700 }); noise(c, o, { dur: 0.5, gain: 0.8, type: 'bandpass', freq: 1800, freqEnd: 500, q: 1, seed: 103 }); tone(c, o, { dur: 0.3, gain: 0.7, freq: 120, freqEnd: 50 }); }],
+  chop_zink: [0.45, (c, o) => { tone(c, o, { dur: 0.35, gain: 0.35, freq: 1180, freqEnd: 1150 }); tone(c, o, { dur: 0.25, gain: 0.25, freq: 1770 }); noise(c, o, { dur: 0.03, gain: 0.8, type: 'highpass', freq: 3000, seed: 106 }); }],
   weak_hit: [0.5, (c, o) => { tone(c, o, { dur: 0.3, gain: 0.35, freq: 1568 }); tone(c, o, { t: 0.06, dur: 0.35, gain: 0.3, freq: 2349 }); noise(c, o, { dur: 0.05, gain: 0.4, type: 'highpass', freq: 5000, seed: 107 }); }],
   wave_horn: [2.2, (c, o) => { for (const [f, g] of [[98, 0.4], [147, 0.3], [196, 0.15]]) tone(c, o, { dur: 1.8, gain: g, freq: f, freqEnd: f * 0.97, type: 'sawtooth', attack: 0.25 }); noise(c, o, { dur: 1.8, gain: 0.25, type: 'bandpass', freq: 400, q: 1, attack: 0.3, seed: 108 }); }],
   core_alarm: [0.9, (c, o) => { for (let i = 0; i < 2; i++) { tone(c, o, { t: i * 0.4, dur: 0.18, gain: 0.3, freq: 880, type: 'square' }); tone(c, o, { t: i * 0.4 + 0.2, dur: 0.18, gain: 0.3, freq: 660, type: 'square' }); } }],
@@ -197,6 +198,11 @@ const DEFS = {
   zap: [0.4, (c, o) => { noise(c, o, { dur: 0.18, gain: 0.8, type: 'bandpass', freq: 3200, q: 3, seed: 142 }); for (let i = 0; i < 3; i++) tone(c, o, { t: i * 0.03, dur: 0.05, gain: 0.25, freq: 1800 + i * 900, freqEnd: 600 }); }],
   freeze_blast: [1.0, (c, o) => { noise(c, o, { dur: 0.8, gain: 0.8, type: 'highpass', freq: 3000, freqEnd: 8000, attack: 0.01, seed: 135 }); for (let i = 0; i < 5; i++) tone(c, o, { t: i * 0.05, dur: 0.4, gain: 0.12, freq: 2400 + i * 610 }); }],
   chest_chime: [0.9, (c, o) => [1175, 1480, 1760].forEach((f, i) => tone(c, o, { t: i * 0.09, dur: 0.5, gain: 0.12, freq: f }))],
+  // Hoarder payout: a coin cascade — a bright ascending chime plus a scatter of metallic tinkles
+  cash: [1.0, (c, o) => {
+    [880, 1108, 1318, 1760, 2217].forEach((f, i) => tone(c, o, { t: i * 0.055, dur: 0.4, gain: 0.16, freq: f, type: 'triangle' }));
+    for (let i = 0; i < 6; i++) noise(c, o, { t: i * 0.045 + Math.random() * 0.02, dur: 0.035, gain: 0.3, type: 'highpass', freq: 5000 + i * 700, seed: 190 + i });
+  }],
   pop: [0.3, (c, o) => { noise(c, o, { dur: 0.08, gain: 1, type: 'bandpass', freq: 1200, q: 1, seed: 136 }); tone(c, o, { dur: 0.1, gain: 0.4, freq: 600, freqEnd: 200 }); }],
   heal_done: [0.6, (c, o) => [660, 880, 1320].forEach((f, i) => tone(c, o, { t: i * 0.07, dur: 0.3, gain: 0.18, freq: f, type: 'triangle' }))],
   throw: [0.3, (c, o) => noise(c, o, { dur: 0.22, gain: 0.6, type: 'bandpass', freq: 400, freqEnd: 1600, q: 1.2, attack: 0.04, seed: 137 })],

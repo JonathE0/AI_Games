@@ -194,7 +194,7 @@ export function rollRarity(rng, weights) {
 }
 const ammoFor = (id, n = 1) => (WEAPONS[id].ammo ? { kind: 'ammo', type: WEAPONS[id].ammo, n: Math.round(AMMO[WEAPONS[id].ammo].pack * n * 1.5) } : null);
 const anyItem = rng => ({ kind: 'item', id: pick(rng, [...THROWABLES, ...HEALS]), n: 1 });
-const mats = (rng, n) => ({ kind: 'mats', mat: pick(rng, ['wood', 'stone', 'metal']), n });
+const mats = n => ({ kind: 'mats', mat: 'zink', n });
 // a looted gun: rarity roll, a chance of an element, a chance of a higher tier
 const lootGun = (rng, w, rw, elChance, t2 = 0, t3 = 0) => {
   const t = rng() < t3 ? 3 : rng() < t2 ? 2 : 1;
@@ -234,16 +234,16 @@ export function rollLoot(kind, rng = Math.random) {
     out.push(lootGun(rng, w, [30, 30, 25, 12, 3], 0.1), ammoFor(w));
     if (rng() < 0.5) out.push(anyItem(rng));
     if (rng() < 0.15) out.push(lootArmor(rng));
-    out.push(mats(rng, 45), deployItem(rng)); // mostly a cheap trap, rarely a good turret
+    out.push(mats(45), deployItem(rng)); // mostly a cheap trap, rarely a good turret
   } else if (kind === 'drop') {
     const w = rng() < 0.25 ? pick(rng, ['rocket', 'minigun', 'gl', 'kinetic']) : pick(rng, LOOT_GUNS);
-    out.push(lootGun(rng, w, [0, 10, 40, 35, 15], 0.4, 0.3), ammoFor(w, 2), anyItem(rng), anyItem(rng), mats(rng, 150), deployItem(rng, 2));
+    out.push(lootGun(rng, w, [0, 10, 40, 35, 15], 0.4, 0.3), ammoFor(w, 2), anyItem(rng), anyItem(rng), mats(150), deployItem(rng, 2));
     if (rng() < 0.3) out.push(lootArmor(rng, 0.3));
     if (rng() < 0.25) out.push(lootAttach(rng));
   } else {
     for (let i = 0; i < 2; i++) { const w = pick(rng, [...LOOT_GUNS, 'rocket', 'minigun', 'gl', 'kinetic']); out.push({ ...lootGun(rng, w, [0, 0, 0, 1, 1], 0.6, 1, 0.35) }, ammoFor(w, 2)); }
     out.push(lootArmor(rng, 1, 0.35), lootAttach(rng), deployItem(rng, 4)); // best odds in the game at a good turret
-    out.push(anyItem(rng), anyItem(rng), anyItem(rng), { kind: 'mats', mat: 'wood', n: 225 }, { kind: 'mats', mat: 'stone', n: 225 }, { kind: 'mats', mat: 'metal', n: 225 }, { kind: 'svsupply' });
+    out.push(anyItem(rng), anyItem(rng), anyItem(rng), mats(675), { kind: 'svsupply' }); // was 3x225 split across wood/stone/metal
   }
   return out.filter(Boolean);
 }
@@ -253,7 +253,7 @@ export function rollLoot(kind, rng = Math.random) {
 // stays a one-off (no level, just tops the magazine back up to DEFENSES[...].ammo).
 export const SMITH = {
   x: -4.2, z: 3.6, reach: 3.6,
-  infuse: { money: 1500, metal: 40 },
+  infuse: { money: 1500, zink: 40 },
   turret: {
     dmg: { name: '+25% damage', price: 800 },
     range: { name: '+20% range', price: 600 },
@@ -337,4 +337,5 @@ export function survivorTier(wave, rng = Math.random) {
 export const SURVIVOR_NAMES = ['Maya', 'Dex', 'Rook', 'Juno', 'Ivy', 'Otto', 'Kaz', 'Nell', 'Bram', 'Suki', 'Vale', 'Ren'];
 
 export const intermissionFor = wave => Math.min(120, 35 + 7 * wave) * 1000; // longer breaks as waves get harder (2 min max)
+export const MAW_BREAK = 4 * 60 * 1000; // the break after a Maw wave (15, 30 …) is longer instead — it wrecks the whole fort
 export const MONEY_CAP = 50000;

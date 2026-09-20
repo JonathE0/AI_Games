@@ -20,9 +20,7 @@ export const MAT_RESIST = {
   p: 0.4,      // plywood panels
   d: 0.8,      // drywall
   h: 1.5,      // sheet metal
-  W: 0.8,      // Holdout wood build: shoot-through
-  S: 3.5,      // Holdout stone build: rifles/snipers only, at reduced damage
-  M: 8,        // Holdout metal build: stops bullets
+  Z: 5,        // Holdout Zinkonium build: tougher than old stone, softer than old metal — rifles get very little through
 };
 
 export const lerp = (a, b, t) => a + (b - a) * t;

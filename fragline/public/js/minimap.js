@@ -7,7 +7,7 @@ import { OUTPOST, OUTPOST_NODES } from '/shared/outpost.js';
 import { SMITH } from '/shared/holdout.js';
 
 const $ = id => document.getElementById(id);
-const BUILD_FILL = { wood: '#c08a4e', stone: '#a9a49a', metal: '#8e9cab' };
+const BUILD_FILL = { zink: '#8fc9bf' };
 const PROP_FILL = { w: '#8a6a45', d: '#8f8778', h: '#56626b', c: '#7c776c' };
 const NODE_FILL = { tree: '#3f7a3a', rock: '#7a7a70', car: '#4a5560', crate: '#8a6a45', barrel: '#6b5a48', rubble: '#6f6a60', pallet: '#8a6a45' };
 const LANE_POS = Object.fromEntries(OUTPOST.lanes.map(l => [l.id, [(l.zone[0] + l.zone[2]) / 2, (l.zone[1] + l.zone[3]) / 2]]));
@@ -142,7 +142,7 @@ export class Minimap {
   // which zombies you can place (night hides the far ones)
   zombieVisible(zb, me, dark, torch, yaw, nvK = 0) {
     if (zb.type === 'shade') return (zb.vis ?? 0) > 0.5; // only shown while you can actually see it in the world
-    if (zb.berserk) return true; // time's up: berserk stragglers always show, day or night
+    if (zb.berserk || zb.type === 'hoarder') return true; // time's up stragglers, and the Hoarder, always show
     if (!dark) return true;
     const dx = zb.pos[0] - me[0], dz = zb.pos[2] - me[2], d = Math.hypot(dx, dz);
     if (d < 15 || zb.t.boss || zb.t.flyer || (this.revealed.get(zb.id) ?? 0) > this.g.now) return true;
@@ -211,6 +211,13 @@ export class Minimap {
         const dx = X(zb.pos[0]), dz = Z(zb.pos[2]), r = 3.6 * k;
         c.fillStyle = '#ff3030';
         c.beginPath(); c.moveTo(dx, dz - r); c.lineTo(dx + r, dz); c.lineTo(dx, dz + r); c.lineTo(dx - r, dz); c.fill();
+        continue;
+      }
+      if (zb.type === 'hoarder') { // a pulsing gold coin — impossible to miss
+        const pulse = 0.75 + 0.25 * Math.sin(g.now * 6);
+        c.fillStyle = '#ffd700';
+        c.beginPath(); c.arc(X(zb.pos[0]), Z(zb.pos[2]), 4 * k * pulse, 0, Math.PI * 2); c.fill();
+        c.strokeStyle = '#7a5b00'; c.lineWidth = 1.5 * k; c.stroke();
         continue;
       }
       if (zb.t.flyer) { // a little triangle in the air — the Sky Sniper glows cyan, the Swooper a duller violet

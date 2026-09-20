@@ -69,6 +69,13 @@ function step(room, z, dt, now, hash) {
   z.hist.push(now, pos[0], pos[1], pos[2]);
   if (z.hist.length > 36) z.hist.splice(0, 4);
   if (z.under) { stepBurrow(room, z, now); return; } // tunnelling
+  if (z.escaping) { // Hoarder: sinking into its escape hole with the cash — no more moving or fighting
+    const k = Math.min(1, (now - z.escaping.t0) / z.escaping.T);
+    z.pos[1] = -2.2 * z.s * k;
+    z.vel[0] = z.vel[2] = 0;
+    if (k >= 1) room.despawnZombie(z);
+    return;
+  }
   if (now < z.frozenUntil) { // freeze grenade: stuck in place, swing interrupted
     z.vel[0] = z.vel[2] = 0;
     z.state = ZS.MOVE;
@@ -164,7 +171,7 @@ function step(room, z, dt, now, hash) {
     launch(room, z);
     z.state = ZS.STRIKE; z.stateEnd = now + 300; z.nextAtk = now + t.cooldown * 1000;
   } else if (z.state === ZS.STRIKE && now >= z.stateEnd) z.state = ZS.MOVE;
-  if (z.dead) return;
+  if (z.dead || z.escaping) return;
 
   // facing: the thing being attacked, else where it walks
   const tg = z.target;
@@ -236,7 +243,8 @@ function strike(room, z) {
         room.broadcast({ t: 'gsmash', p: [Math.round(c[0] * 100) / 100, Math.round(c[1] * 100) / 100, Math.round(c[2] * 100) / 100] });
       }
     }
-  } else room.damageCore(t.cdmg ?? t.sdmg * mul, z); // Core Seeker: a fixed amount per hit, unscaled by wave difficulty
+  } else if (t.escape) room.hoarderEscape(z); // Hoarder: down the hole with the cash — no reward, just a taunt
+  else room.damageCore(t.cdmg ?? t.sdmg * mul, z); // Core Seeker: a fixed amount per hit, unscaled by wave difficulty
 }
 
 // Wall breakers (Iron Golem): the piece it hits takes full sdmg; other pieces within range take 40% of that,

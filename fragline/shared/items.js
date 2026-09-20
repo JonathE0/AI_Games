@@ -16,10 +16,10 @@ export const isConsumable = it => !!it && CONSUMABLE_KINDS.includes(it.kind);
 // Tier upgrades sit on top of rarity: the damage multiplier stacks with the rarity one.
 export const TIERS = [null, { name: 'I', mult: 1 }, { name: 'II', mult: 1.25 }, { name: 'III', mult: 1.55 }];
 export const TIER_COLORS = [null, '#c98a4b', '#c9d1db', '#ffd166']; // bronze / silver / gold
-// what the next tier costs (money, metal): T2 at the Core, T3 at the Blacksmith
+// what the next tier costs (money, Zinkonium): T2 at the Core, T3 at the Blacksmith
 export const tierCost = (it, to) => {
   const r = it.r ?? 0;
-  return to === 2 ? { money: 700 + 350 * r, metal: 0 } : { money: 1800 + 600 * r, metal: 60 };
+  return to === 2 ? { money: 700 + 350 * r, zink: 0 } : { money: 1800 + 600 * r, zink: 60 };
 };
 
 export function kindOf(id) {

@@ -3,8 +3,8 @@
 // break through the weakest point of a sealed fort — one deliberate gap turns into a funnel.
 
 const DIRS = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2]];
-// Extra cells of walking per HP, per cell a piece covers (a wall covers two rows): breaking a full wood
-// wall "costs" ~27 m of detour, stone ~53 m, metal ~93 m — upgraded forts funnel the horde to their gaps.
+// Extra cells of walking per HP, per cell a piece covers (a wall covers two rows): breaking a full
+// Zinkonium wall "costs" ~100 m of detour — a well-built fort funnels the horde to its gaps.
 export const HP_COST = 1 / 15;
 
 // Only things that stand in a walker's way count: floors (0.3 m) and roofs are ignored.

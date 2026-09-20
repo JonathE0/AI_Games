@@ -7,8 +7,10 @@ import { ELEMENTS } from '../../shared/elements.js';
 import { INV_SIZE, HOTBAR, STASH_SIZE, SACK_SIZE, ARMOR, ARMOR_SLOTS, ATTACH, stackMax, magFor, kindOf, placeItem, countIn, tierCost, itemName, isConsumable, fits } from '../../shared/items.js';
 import { MAT_IDS } from '../../shared/build.js';
 import { nextUid } from '../baseRoom.js';
+import { P, topAt } from '../../shared/physics.js';
 
 const r2 = v => Math.round(v * 100) / 100;
+const FALL_TERMINAL = 16; // m/s
 
 // ---------- items ----------
 export const makeGun = (id, r = 0, tier = 1, el = null) => ({ uid: nextUid(), id, kind: 'gun', r, tier, el, att: {} });
@@ -100,8 +102,9 @@ export class Inventory {
   reset() {
     this.pickups = new Map();
     this.nextId = 1;
-    this.stash = { money: 0, mats: { wood: 0, stone: 0, metal: 0 }, ammo: Object.fromEntries(AMMO_IDS.map(t => [t, 0])), items: Array(STASH_SIZE).fill(null) };
+    this.stash = { money: 0, mats: Object.fromEntries(MAT_IDS.map(m => [m, 0])), ammo: Object.fromEntries(AMMO_IDS.map(t => [t, 0])), items: Array(STASH_SIZE).fill(null) };
     this.autoAt = 0;
+    this.restAt = 0;
   }
 
   // ---------- ground pickups ----------
@@ -110,7 +113,7 @@ export class Inventory {
   spawn(data, pos, boss = false) {
     const raw = data.kind === 'ammo' || data.kind === 'mats' || data.kind === 'svsupply';
     const life = (boss ? 8 : 4) * 60000;
-    const pk = { id: this.nextId++, ...(raw ? data : { kind: 'it', item: itemFrom(data) }), pos: [r2(pos[0]), r2(pos[1]), r2(pos[2])], expire: Date.now() + life };
+    const pk = { id: this.nextId++, ...(raw ? data : { kind: 'it', item: itemFrom(data) }), pos: [r2(pos[0]), r2(pos[1]), r2(pos[2])], expire: Date.now() + life, vy: 0, resting: false };
     this.pickups.set(pk.id, pk);
     this.room.broadcast({ t: 'pk', l: [this.tuple(pk)] });
     return pk;
@@ -198,6 +201,40 @@ export class Inventory {
         if (!this.pickups.has(pk.id)) break;
       }
     }
+  }
+
+  // Highest surface at (x, z) no higher than `y` — the same boxes players collide with (ground, built
+  // floors/ramps, map props). The ground plane always covers the map, so this never comes up empty.
+  surfaceBelow(x, z, y) {
+    const boxes = this.room.grid.query(x - 0.15, z - 0.15, x + 0.15, z + 0.15, this.fallBoxes ??= []);
+    let top = 0;
+    for (const b of boxes) {
+      if (x <= b.min[0] || x >= b.max[0] || z <= b.min[2] || z >= b.max[2]) continue;
+      const t = topAt(b, x, z, 0);
+      if (t <= y + 0.05 && t > top) top = t;
+    }
+    return top;
+  }
+
+  // Every pickup that isn't resting on something falls until it lands. Resting ones are re-checked every
+  // ~200ms so a pickup on a floor that gets shot/edited away starts falling again. Broadcast cheaply: only
+  // the pickups that actually moved this tick, and only their height (see holdout_ents.js fallPickup).
+  updateGravity(now, dt) {
+    const recheck = now - this.restAt >= 200;
+    if (recheck) this.restAt = now;
+    const moved = [];
+    for (const pk of this.pickups.values()) {
+      const [x, y, z] = pk.pos;
+      if (pk.resting) {
+        if (!recheck || this.surfaceBelow(x, z, y) >= y - 0.05) continue;
+        pk.resting = false; // lost its floor
+      }
+      pk.vy = Math.max(pk.vy - P.gravity * dt, -FALL_TERMINAL);
+      const ny = y + pk.vy * dt, top = this.surfaceBelow(x, z, y);
+      if (ny <= top) { pk.pos[1] = r2(top); pk.vy = 0; pk.resting = true; } else pk.pos[1] = r2(ny);
+      moved.push(pk);
+    }
+    if (moved.length) this.room.broadcast({ t: 'pkfall', l: moved.map(pk => [pk.id, pk.pos[1]]) });
   }
 
   // ---------- moving things around the grid (drag & drop) ----------
@@ -335,9 +372,9 @@ export class Inventory {
     if (to === 3 && !atSmith) return deny('Tier III is forged by the Blacksmith');
     if (!atSmith && !room.canBuy(p)) return deny('Upgrade inside the ring around the Core');
     const cost = tierCost(it, to);
-    if (p.money < cost.money || p.mats.metal < cost.metal) return deny(`Needs $${cost.money}${cost.metal ? ` + ${cost.metal} metal` : ''}`);
+    if (p.money < cost.money || p.mats.zink < cost.zink) return deny(`Needs $${cost.money}${cost.zink ? ` + ${cost.zink} Zinkonium` : ''}`);
     p.money -= cost.money;
-    p.mats.metal -= cost.metal;
+    p.mats.zink -= cost.zink;
     it.tier = to;
     room.sendInv(p);
     if (it.kind === 'armor') room.armorChanged(p);

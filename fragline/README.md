@@ -95,9 +95,17 @@ of purple storm gates on the north/east/south/west edges, and you build, harvest
   pops up a tile past it — 9), Shieldbearer (front shield stops bullets; flank it or use explosives,
   elements and knockback — 9), Pyro (fire, immune to fire — 11), Frost Walker (slowing aura, immune to ice — 12),
   **Core Seeker** (ignores you completely and runs at the Core, red marker — 5), **Iron Golem** (a slow armored
-  wall breaker that walks straight through your fort and one-shots wood, tagged WALL BREAKER — 7),
+  wall breaker that walks straight through your fort and smashes Zinkonium in a hit or two, tagged WALL BREAKER — 7;
+  it hits hard but it is no longer a tank — 650 HP, so focused fire drops it before it reaches the Core),
   and on night waves the **Shade** (from wave 6): weak, but invisible through night vision and only visible
   without it up close — you'll hear it before you see it.
+  **Loot carriers** turn up all match: the **Scavenger** (small and quick, common from wave 2 — nearly always
+  drops ammo, materials or a cheap trap), the **Warden** (armored, slow — 6, usually an armor piece and
+  sometimes a turret) and the rare **Relic Bearer** (7, always a high-rarity gun or attachment — an SSG, or an
+  AWP from wave 15). Each is rarer than the last, so good loot keeps coming without being guaranteed.
+  The **Hoarder** (from wave 3) hauls a sack of cash and ignores you completely: it sprints for the middle of the
+  map and escapes down a hole if you let it. Drop it and the whole squad splits a big payout ($1,200 + $120 per
+  wave). One is guaranteed every 4th wave and has a 12 % chance on the others.
   From wave 6 some zombies come as **Tank** (2× HP, bigger), **Assault** (faster, harder hits) or **Medic**
   (heals zombies around it) variants. The Alpha Brute returns as an elite every 4th wave from wave 12.
 - **Bosses** every 5 waves, each repeat 50 % tougher:
@@ -111,7 +119,8 @@ of purple storm gates on the north/east/south/west edges, and you build, harvest
   - **The Maw (15, 30…):** a giant worm hunting underground and bursting up under builds and players. Hold **E**
     on the **seismic thumpers** (in the two houses and a corner shack, shown on the map) to lure it up stunned —
     shoot the glowing throat for triple damage. Below 25 % it tunnels toward the Core to devour it: arm two
-    thumpers or blast its mouth to stop it. Drops the **Maw Fang**.
+    thumpers or blast its mouth to stop it. Drops the **Maw Fang**. It leaves the fort in pieces, so the break
+    after a Maw wave runs **4 minutes** instead of the usual timer — enough to rebuild the Core area properly.
   - **Boss weapons** (always Legendary, tier III): **Skybreaker** — sniper whose shots pierce every zombie in
     a line and mark them (+25 % damage from everyone for 5 s); **Brood Launcher** — grenades split into acid
     bomblets that leave zombie-melting pools; **Maw Fang** — shotgun that heals you for 10 % of its damage, and
@@ -150,22 +159,28 @@ of purple storm gates on the north/east/south/west edges, and you build, harvest
 - **The Blacksmith** (after wave 7 clears, anvil beside the Core, **E**): tier III forging for guns and
   armor, element infusion, attachments (Extended Mag, Compensator, Flashlight, Laser Sight) and turret upgrades
   (damage, range, fire rate, ammo refill, incendiary / frost rounds, armor plate — stand near the turret).
+  Forging tier III and infusing an element cost money plus **Zinkonium**.
 - **Building (G):** walls, floors and stairs on a 4 m grid with their own keys while build mode is on —
   **Q** wall · **E** stair · **F** floor · **T** trap · **Z** turret / Rally Fire · **R** rotate the stair (it
-  always rises away from you) · wheel = wood/stone/metal. LMB place (hold to turbo-build), RMB upgrade,
+  always rises away from you) · wheel cycles the selected trap/turret. LMB place (hold to turbo-build),
   **X** demolish your own piece, hold **E** to repair. Rebind them in Settings → Key bindings → *Building*.
-  Pieces grow to full HP over 2/4/7 s. Wood is shoot-through, stone halves rifle damage, metal stops bullets.
+  Everything is built from **Zinkonium** — one tough material, no upgrading a piece to something better.
+  Pieces grow to full HP over 4 s and shrug off most rifle fire.
   Stairs are Fortnite-style ramps: a thin sloped slab you can run up, walk and shoot underneath, and see from
   below. Floors sit flush with each level, so stairs run straight onto the floor above and doors on a floor
   are tall enough to walk through. **Structural integrity:** anything that loses its connection to the ground collapses.
 - **Zombies chew through walls more slowly now**, and a crowd attacking the same piece splits its damage —
   except the Iron Golem, which hits at full force.
+- **The map is a ruin:** collapsed apartment blocks, a burnt-out gas station, a crashed bus and a leaning
+  watchtower sit in the four quarters, wrapped in vines, rubble, dead scrub and scattered wreckage. They are
+  cover, harvestable material and landmarks — and there are chests and survivor shelters tucked inside them.
 - **Everything breaks except the Core:** houses, walls, roofs, crates, shacks and ruins have HP; zombies,
   explosives and bullets wear them down, and your knife harvests them for materials.
 - **Funnels:** zombies weigh a detour against smashing through. Leave one opening and make it a killbox.
-- **Harvesting:** your knife chops trees (wood), rocks (stone), wrecked cars (metal) and map props. Hit the
-  glowing weak point for 2.5× materials.
-- **Edits (V):** walls are a 3×3 grid (bottom middle two = a **door**, single tiles = **windows**), floors 2×2,
+- **Harvesting:** your knife chops trees, rocks, wrecked cars and map props for **Zinkonium** — the one
+  building material. Hit the glowing weak point for 2.5× materials.
+- **Edits (V):** hold the fire button and drag over the tiles you want gone — **letting go of the mouse applies
+  the edit straight away**, no second key press. Walls are a 3×3 grid (bottom middle two = a **door**, single tiles = **windows**), floors 2×2,
   stairs split into halves. **Ladders** on every face of the Core lead to its roof.
 - **Shop (B, inside the ring around the Core — the ring is wide now):** one page with everything to buy —
   guns (each also as a fire / water / ice / shock version), ammo, grenades / molotovs / freeze grenades,
@@ -196,7 +211,8 @@ of purple storm gates on the north/east/south/west edges, and you build, harvest
   **ping** a spot — the squad sees it on the map, on the compass and as a beam in the world for 8 s.
 - **Supply drops and chests:** balloons float crates down during waves (shoot the balloons to drop them fast);
   chests around the map restock every 3 waves. Zombies, chests and drops hand out plenty of ammo and materials.
-  Loot left on the ground disappears after 4 minutes (8 for boss loot).
+  Loot left on the ground disappears after 4 minutes (8 for boss loot). Anything dropped **falls**: loot that
+  lands on a roof, a ramp or a crate drops to the surface below instead of hanging in the air.
 - **Survivors (rescue waves 3, 7, 11…):** carry the wounded from the corner shelters into the Core ring (+$500).
   Each one is a **Guardian** (heavy armor and a shotgun, holds the front and draws zombies), a **Medic** (heals
   people around it, light gun) or a **Ranger** (rifle, best damage, stays back), and their tier — Recruit, Guard,

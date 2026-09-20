@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { traceBullet, dirFromAngles } from '../shared/physics.js';
-import { pieceBox } from '../shared/build.js';
+import { traceBullet, dirFromAngles, MAT_RESIST } from '../shared/physics.js';
+import { pieceBox, BMATS } from '../shared/build.js';
 
 const eye = [0, 1.6, 10];
 const fwd = dirFromAngles(0, 0); // looking down -Z
@@ -27,12 +27,13 @@ test('scaled targets are bigger: a 1.7x brute head sits where a normal one has a
   assert.equal(traceBullet(high, fwd, 100, [], [{ id: 2, x: 0, y: 0, z: 0, yaw: 0, c: 0, s: 1.7 }], 2).player.part, 'head');
 });
 
-test('built wood is shoot-through, stone halves rifle damage, metal stops bullets', () => {
+test('a built piece\'s HP and its bullet resistance both come from Zinkonium, the one build material', () => {
+  assert.equal(BMATS.zink.hp, 750);
+  assert.equal(BMATS.zink.code, 'Z');
+  assert.equal(MAT_RESIST.Z, 5);
   const tgt = [{ id: 1, x: 0, y: 0, z: -6, yaw: 0, c: 0 }];
-  const wall = mat => [pieceBox({ id: 1, kind: 'wall', i: 11, k: 12, l: 0, o: 0, mat })]; // runs along x at z = 0
+  const wall = [pieceBox({ id: 1, kind: 'wall', i: 11, k: 12, l: 0, o: 0, mat: 'zink' })]; // runs along x at z = 0
   const o = [-2, 1.6, 6];
-  const pen = mat => traceBullet(o, [0, 0, -1], 100, wall(mat), [{ ...tgt[0], x: -2 }], 2).player?.pen ?? 0;
-  assert.ok(pen('wood') > 0.85);
-  assert.ok(pen('stone') > 0.4 && pen('stone') < 0.55);
-  assert.equal(pen('metal'), 0);
+  const pen = traceBullet(o, [0, 0, -1], 100, wall, [{ ...tgt[0], x: -2 }], 2).player?.pen ?? 0;
+  assert.ok(pen > 0.15 && pen < 0.4, `tougher than the old stone, softer than the old metal — pen=${pen}`);
 });

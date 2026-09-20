@@ -17,7 +17,7 @@ const ITEM_COLOR = {
   spikes: 0x8c9096, darts: 0x8c9096, flame: 0xd65a2a, turret: 0x6a7480, rturret: 0x6a7480, campfire: 0xc9772e,
   gturret: 0x767b80, frturret: 0x8fd6e8, flturret: 0x8a2f1c, tesla: 0x9d8bf0, mortar: 0x3c4034,
 };
-const MAT_COLOR = { wood: 0xc9955a, stone: 0xa9a49b, metal: 0x8d9aa6 };
+const MAT_COLOR = { zink: 0x8fc9bf };
 const lerp = (a, b, t) => a + (b - a) * t;
 const _v = new THREE.Vector3();
 const PICKUP_BLINK = 20; // seconds before despawn that a ground item starts blinking
@@ -247,6 +247,13 @@ export class Entities {
     this.root.add(g);
     const left = extra?.left ?? Infinity;
     this.pickups.set(id, { id, kind, key, ik, n: rn, r: rn, t: extra?.t ?? 0, el: extra?.el ?? null, pos: [x, y, z], g, spin, label, seed: Math.random() * 6, expireAt: this.t + left / 1000 });
+  }
+
+  // Server-authoritative height while it falls (gravity lives in server/holdout/inventory.js) — eased
+  // toward each frame in update() below so it reads as falling instead of snapping tile to tile.
+  fallPickup(id, y) {
+    const pk = this.pickups.get(id);
+    if (pk) pk.fallY = y;
   }
 
   removePickup(id) {
@@ -708,7 +715,7 @@ export class Entities {
   // Iron Golem: a heavy crash + debris burst every time it smashes a piece (camera shake is holdout.js's job)
   golemSmash(p) {
     for (let i = 0; i < 3; i++) this.world.burst([p[0] + (Math.random() - 0.5) * 1.5, p[1] + (Math.random() - 0.5), p[2] + (Math.random() - 0.5) * 1.5], [0, 1, 0], 0x8a7a5a, 10, 6);
-    this.sound.play('break_M', { pos: p, vol: 1.3, ref: 8, rate: 0.6 });
+    this.sound.play('break_Z', { pos: p, vol: 1.3, ref: 8, rate: 0.6 });
   }
 
   // the Brood Titan drops fresh minions off its back: a small landing puff where they fall
@@ -938,6 +945,7 @@ export class Entities {
     for (const pk of this.pickups.values()) {
       pk.spin.rotation.y += dt * 1.6;
       pk.spin.position.y = 0.45 + Math.sin(this.t * 2 + pk.seed) * 0.07;
+      if (pk.fallY !== undefined) { pk.pos[1] += (pk.fallY - pk.pos[1]) * Math.min(1, dt * 14); pk.g.position.y = pk.pos[1]; }
       const left = pk.expireAt - this.t;
       pk.g.visible = !(left > 0 && left < PICKUP_BLINK && Math.floor(this.t * 5) % 2 === 0);
       if (pk.label) pk.label.visible = Math.hypot(pk.pos[0] - ctx.me[0], pk.pos[1] - ctx.me[1], pk.pos[2] - ctx.me[2]) < PICKUP_LABEL_R;

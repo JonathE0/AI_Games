@@ -5,12 +5,12 @@
 import { WEAPONS, computeDamage } from '../../shared/weapons.js';
 import { OUTPOST, OUTPOST_STATIC, OUTPOST_PROPS, PROP_TYPES, OUTPOST_NODES, NODE_TYPES } from '../../shared/outpost.js';
 import { armorStats, damageReduction, gunMult } from '../../shared/items.js';
-import { EL } from '../../shared/elements.js';
+import { EL, ELEMENT_IDS } from '../../shared/elements.js';
 import { shieldBlocks, bloaterBurst, addHazard, updateHazards, updateSpecials, updatePlayerEffects, playerEffect } from './behaviors.js';
 import { FLYER_ALT } from './flyers.js';
 import { BMATS, MAT_IDS, KINDS, PIECE_COST, REPAIR_HP_PER_MAT, START_FRAC, REFUND, REACH, pieceBox, pieceBoxes, slotKey, checkPlacement, distToBox, validMask, unsupported } from '../../shared/build.js';
-import { ZTYPES, ZTYPE_IDS, ZCLASSES, ZCLASS_IDS, ZDROPS, CORE_ARMOR, coreHp, bossHp, bossFor, variantChance } from '../../shared/zombies.js';
-import { ITEMS, RARITY, POWERUPS, BUFF, AMMO, MAT_CAP, MONEY_CAP, CLASSES, SURVIVOR_CLASSES, intermissionFor, rollLoot, rollDeploy } from '../../shared/holdout.js';
+import { ZTYPES, ZTYPE_IDS, ZCLASSES, ZCLASS_IDS, ZDROPS, CORE_ARMOR, coreHp, bossHp, bossFor, variantChance, hoarderCash } from '../../shared/zombies.js';
+import { ITEMS, RARITY, POWERUPS, BUFF, AMMO, AMMO_IDS, ARMOR_IDS, ATTACH_IDS, MAT_CAP, MONEY_CAP, CLASSES, SURVIVOR_CLASSES, intermissionFor, MAW_BREAK, rollLoot, rollDeploy } from '../../shared/holdout.js';
 import { rayWorld, blocked } from '../../shared/physics.js';
 import { BoxGrid } from '../../shared/boxgrid.js';
 import { BaseRoom, nextUid } from '../baseRoom.js';
@@ -28,7 +28,7 @@ import { Bosses } from './bosses.js';
 import { Blacksmith } from './blacksmith.js';
 
 export const HOLDOUT = {
-  startMoney: 800, startMats: { wood: 200, stone: 60, metal: 30 }, waveMats: { wood: 50, stone: 30, metal: 15 },
+  startMoney: 800, startMats: { zink: 290 }, waveMats: { zink: 95 },
   countdown: 5000, readySkip: 3000, endScreen: 2500, // endScreen: the beat after a defeat before the map resets
   bleed: 30000, revive: 3000, reviveHp: 80, respawnSolo: 8000, respawnTeam: 12000,
   aiStep: 0.05, coreHeal: 60, chests: 6,
@@ -36,6 +36,7 @@ export const HOLDOUT = {
 const r2 = v => Math.round(v * 100) / 100;
 const r3 = v => Math.round(v * 1000) / 1000;
 const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
+const pick = (rng, list) => list[Math.floor(rng() * list.length)];
 const clamp16 = v => Math.max(-32767, Math.min(32767, Math.round(v)));
 const MARK_MULT = 1.25; // Skybreaker's "mark" perk: +25% damage from every source while marked
 const isBuild = s => s.kind !== 'prop';
@@ -283,10 +284,12 @@ export class HoldoutRoom extends BaseRoom {
     for (const pr of this.proj) this.broadcast({ t: 'splat', id: pr.id, p: pr.pos.map(r2) }); // globs still in the air fizzle
     this.proj = [];
     this.phase = 'intermission';
-    this.phaseEnd = Date.now() + intermissionFor(w);
+    const mawBreak = bossFor(w) === 'maw'; // it wrecks the whole fort: a much longer break to rebuild
+    this.phaseEnd = Date.now() + (mawBreak ? MAW_BREAK : intermissionFor(w));
     this.director.plan(w + 1);
     if (w % 3 === 0) this.events.refreshChests(HOLDOUT.chests);
     if (w === 7 && !this.bosses.smith) { this.bosses.smith = true; this.onSmithUnlocked(); }
+    if (mawBreak) this.broadcast({ t: 'task', text: 'The Maw wrecked the fort — 4 minutes to rebuild this break' });
     const next = bossFor(w + 1);
     if (next === 'sky') {
       this.broadcast({ t: 'task', text: "Something huge darkens the sky next wave — the squad's sniper rifles are waiting in the team chest, one each!" });
@@ -371,6 +374,7 @@ export class HoldoutRoom extends BaseRoom {
     }
     this.events.update(dt, now);
     this.inventory.update(now);
+    this.inventory.updateGravity(now, dt);
     if (this.coreHealer && now - this.coreHealAt > 600) { this.coreHealer = null; this.broadcast({ t: 'coreheal', id: null }); }
     if (this.flowDirty && now - this.flowAt >= 250) {
       this.flow.update(this.aliveNodeBoxes(), [...this.pieces.values()]);
@@ -457,6 +461,8 @@ export class HoldoutRoom extends BaseRoom {
     } else if ((type === 'swooper' || type === 'skysniper') && this.flyerWaveAlert !== this.wave) {
       this.flyerWaveAlert = this.wave;
       this.broadcast({ t: 'task', text: type === 'swooper' ? 'SWOOPER — incoming from above!' : 'SKY SNIPER — a laser from the sky means take cover!' });
+    } else if (type === 'hoarder') { // one per wave at most, always worth an alert
+      this.broadcast({ t: 'task', text: 'A HOARDER is running for the Core — kill it for the cash!' });
     }
     return zb;
   }
@@ -615,7 +621,7 @@ export class HoldoutRoom extends BaseRoom {
 
   // Any damage to a zombie (guns, explosives, traps, turrets, survivors). `by` = player, survivor or null.
   damageZombie(z, dmg, by, wId, hs = false) {
-    if (z.dead || !(dmg > 0) || z.under) return 0; // nothing reaches a burrower underground
+    if (z.dead || !(dmg > 0) || z.under || z.escaping) return 0; // nothing reaches a burrower underground, or a Hoarder already mid-escape
     if (this.bosses.immune(z)) return 0;           // Brood riders on the Titan's back
     if (z.markUntil > Date.now()) dmg *= MARK_MULT; // Skybreaker: marked zombies take extra from everything
     if (by?.stats) z.lastHitBy = by.id;
@@ -631,13 +637,14 @@ export class HoldoutRoom extends BaseRoom {
     if (z.dead) return;
     z.dead = true;
     this.zombies.delete(z.id);
+    if (z.type === 'hoarder') return this.hoarderPayout(z, killer, wId, hs);
     const reward = z.t.reward, player = killer?.stats ? killer : null;
     if (player) {
       player.stats.kills++;
       if (!z.noReward) { // berserk reinforcements (director.js) are worth nothing — time's up, no farming them
         player.money = Math.min(MONEY_CAP, player.money + reward);
         if (player.cls === 'assault') player.assaultBuffUntil = Date.now() + CLASSES.assault.killRateMs; // +fire rate briefly after a kill
-        if (this.rng() < 0.25) player.mats.metal += 3; // scrap
+        if (this.rng() < 0.25) player.mats.zink += 3; // scrap
       }
       this.sendInv(player);
       // now and then a zombie drops a few rounds for the gun that killed it (ammo is otherwise bought)
@@ -662,17 +669,64 @@ export class HoldoutRoom extends BaseRoom {
     this.broadcast({ t: 'zdie', id: z.id, by: killer?.isSurvivor ? 'sv' + killer.id : killer?.id ?? null, hs, w: wId });
   }
 
-  // Some zombies carry something worth taking (shared/zombies.js DROPS), elite/large ones can also drop a
+  // The Hoarder, killed before it reaches the Core: a flat cash bonus for the whole squad (every player gets
+  // the full amount, not a split), scaling with wave. Still a normal kill otherwise (feed line, z_die, loot rules).
+  hoarderPayout(z, killer, wId, hs) {
+    if (killer?.stats) killer.stats.kills++;
+    const cash = hoarderCash(this.wave);
+    for (const p of this.players) { p.money = Math.min(MONEY_CAP, p.money + cash); this.sendInv(p); }
+    this.broadcast({ t: 'hoardcash', p: [r2(z.pos[0]), r2(z.pos[1]), r2(z.pos[2])], amt: cash });
+    this.broadcast({ t: 'zdie', id: z.id, by: killer?.isSurvivor ? 'sv' + killer.id : killer?.id ?? null, hs, w: wId });
+  }
+
+  // The Hoarder reached the Core: it dives down a hole with the cash. Nobody gets paid — just a taunt.
+  // ai.js ticks z.escaping (a quick sink) and calls despawnZombie once it's done.
+  hoarderEscape(z) {
+    if (z.dead || z.escaping) return;
+    z.escaping = { t0: Date.now(), T: 900 };
+    z.target = null;
+    this.broadcast({ t: 'msg', text: 'The HOARDER got away with the cash — nobody gets paid!' });
+  }
+
+  // Silent removal: no death animation, no sound, no reward (only the Hoarder's escape uses this).
+  despawnZombie(z) {
+    if (z.dead) return;
+    z.dead = true;
+    this.zombies.delete(z.id);
+    this.broadcast({ t: 'zdie', id: z.id, by: null, silent: true });
+  }
+
+  // Some zombies carry something worth taking (shared/zombies.js ZDROPS), elite/large ones can also drop a
   // trap or turret (deployOdds, weighted by shared/holdout.js DEPLOY_WEIGHT), and at night any of them may
   // drop a flashlight.
   typeDrop(z) {
     const at = [z.pos[0], z.pos[1] + 0.2, z.pos[2]], d = ZDROPS[z.type];
     if (d && this.rng() < d.chance) {
-      const w = typeof d.gun === 'function' ? d.gun(this.wave) : d.gun;
-      this.inventory.spawn({ kind: 'gun', w, r: Math.min(4, 1 + Math.floor(this.rng() * 3)), tier: 1, el: null }, at);
+      if (d.kind === 'common') this.commonDrop(at);
+      else if (d.kind === 'armor') this.inventory.spawn({ kind: 'armor', id: pick(this.rng, ARMOR_IDS), tier: 1 + (this.rng() < 0.3 ? 1 : 0) }, at);
+      else if (d.kind === 'relic') this.relicDrop(d, at);
+      else {
+        const w = typeof d.gun === 'function' ? d.gun(this.wave) : d.gun;
+        this.inventory.spawn({ kind: 'gun', w, r: Math.min(4, 1 + Math.floor(this.rng() * 3)), tier: 1, el: null }, at);
+      }
     }
     if (z.t.deployOdds && this.rng() < z.t.deployOdds) this.inventory.spawn({ kind: 'item', id: rollDeploy(this.rng), n: 1 }, at);
     if (this.director.night && this.rng() < 0.08) this.inventory.spawn({ kind: 'item', id: 'flashlight', n: 1 }, at);
+  }
+
+  // Scavenger: whatever's quick to grab — ammo, a stack of materials, or (usually, per DEPLOY_WEIGHT) a cheap trap.
+  commonDrop(at) {
+    const r = this.rng();
+    if (r < 0.4) this.inventory.spawn({ kind: 'item', id: rollDeploy(this.rng), n: 1 }, at);
+    else if (r < 0.7) this.inventory.spawn({ kind: 'mats', mat: MAT_IDS[0], n: 30 + Math.floor(this.rng() * 40) }, at);
+    else { const type = pick(this.rng, AMMO_IDS); this.inventory.spawn({ kind: 'ammo', type, n: AMMO[type].pack }, at); }
+  }
+
+  // Relic Bearer: usually a high-rarity gun (sometimes elemental, sometimes a tier up), else a rare attachment.
+  relicDrop(d, at) {
+    if (this.rng() < 0.3) { this.inventory.spawn({ kind: 'item', id: pick(this.rng, ATTACH_IDS), n: 1 }, at); return; }
+    const w = typeof d.gun === 'function' ? d.gun(this.wave) : d.gun;
+    this.inventory.spawn({ kind: 'gun', w, r: 3 + (this.rng() < 0.4 ? 1 : 0), tier: this.rng() < 0.3 ? 2 : 1, el: this.rng() < 0.4 ? pick(this.rng, ELEMENT_IDS) : null }, at);
   }
 
   // ---------- players shooting ----------
@@ -947,24 +1001,11 @@ export class HoldoutRoom extends BaseRoom {
     this.broadcast({ t: 'sedit', id: s.id, mask: s.mask });
   }
 
+  // One material, no upgrade path — kept as a no-op so a stray client message is refused cleanly.
   onUpgrade(p, m) {
     if (this.notYet(p)) return;
     const s = this.reachable(p, m.id);
-    if (!s) return;
-    const next = BMATS[s.mat].next;
-    if (!next) return this.send(p, { t: 'deny', text: 'Already metal' });
-    if (p.mats[next] < PIECE_COST) return this.send(p, { t: 'deny', text: `Not enough ${next}` });
-    p.mats[next] -= PIECE_COST;
-    const maxHp = this.pieceMaxHp(next), add = maxHp - s.maxHp;
-    s.mat = next;
-    s.maxHp = maxHp;
-    s.grow += add;
-    s.rate = (s.grow / BMATS[next].time) * (1 + 0.2 * (this.teamUps?.engineering || 0)) * (p.cls === 'tank' ? CLASSES.tank.buildMul : 1);
-    s.box.mat = BMATS[next].code;
-    for (const b of s.boxes) b.mat = BMATS[next].code;
-    this.flowDirty = true;
-    this.broadcast({ t: 'supd', s: [pieceUpdate(s)] });
-    this.sendInv(p);
+    if (s) this.send(p, { t: 'deny', text: "Zinkonium doesn't upgrade" });
   }
 
   onRepair(p, m) {
@@ -975,7 +1016,7 @@ export class HoldoutRoom extends BaseRoom {
     if (missing < 1) return;
     const cap = 40 * (1 + 0.2 * (this.teamUps?.engineering || 0)) * (p.cls === 'tank' ? CLASSES.tank.buildMul : 1); // engineering + Tank: more HP per repair action, same mats per HP
     const heal = Math.min(missing, cap, p.mats[s.mat] * REPAIR_HP_PER_MAT);
-    if (heal < 1) return this.send(p, { t: 'deny', text: `Not enough ${s.mat}` });
+    if (heal < 1) return this.send(p, { t: 'deny', text: `Not enough ${BMATS[s.mat].name}` });
     p.lastRepair = now;
     p.mats[s.mat] -= Math.ceil(heal / REPAIR_HP_PER_MAT);
     s.hp += heal;

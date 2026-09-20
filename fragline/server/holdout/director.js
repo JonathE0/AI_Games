@@ -4,7 +4,7 @@
 import { OUTPOST } from '../../shared/outpost.js';
 import {
   ZTYPES, composeWave, waveBudget, laneCount, hpMult, dmgMult, aliveCap, countMult, bossFor, alphaWave, nightRoll,
-  waveTimeLimit, BERSERK_SPEED_MULT, BERSERK_DMG_MULT, berserkGroupSize, BERSERK_INTERVAL,
+  hoarderGuaranteed, hoarderRoll, waveTimeLimit, BERSERK_SPEED_MULT, BERSERK_DMG_MULT, berserkGroupSize, BERSERK_INTERVAL,
 } from '../../shared/zombies.js';
 
 const BOSS_HORDE = 0.5; // boss waves send a lighter ground horde without Brutes (the boss makes up the rest)
@@ -47,6 +47,7 @@ export class Director {
     const boss = bossFor(w), budget = waveBudget(w, n, this.room.diff) * (boss ? BOSS_HORDE : 1);
     this.queue = this.shuffle(composeWave(w, n, this.room.diff, this.rng, budget, this.night).filter(id => !boss || id !== 'brute'));
     if (alphaWave(w)) this.queue.splice(Math.floor(this.queue.length * 0.7), 0, 'alpha'); // pop() order: arrives ~30 % in
+    if (hoarderGuaranteed(w) || hoarderRoll(w, this.rng)) this.queue.splice(Math.floor(this.queue.length * 0.5), 0, 'hoarder'); // one per wave, arrives ~50 % in
     for (const l of this.lanes) this.nextGroup[l] = now + 1500 + this.rng() * 1500;
   }
 
@@ -60,11 +61,14 @@ export class Director {
       this.shuffle(this.queue);
       const a = this.queue.indexOf('alpha'); // keep the boss roughly where it was
       if (a >= 0) { this.queue.splice(a, 1); this.queue.splice(Math.floor(this.queue.length * 0.7), 0, 'alpha'); }
+      const h = this.queue.indexOf('hoarder'); // and the Hoarder, if this wave has one
+      if (h >= 0) { this.queue.splice(h, 1); this.queue.splice(Math.floor(this.queue.length * 0.5), 0, 'hoarder'); }
     } else if (ratio < 1) {
       const keep = Math.ceil(this.queue.length * ratio);
-      const boss = this.queue.includes('alpha');
-      this.queue = this.queue.filter(id => id !== 'alpha').slice(0, keep - (boss ? 1 : 0));
+      const boss = this.queue.includes('alpha'), hoard = this.queue.includes('hoarder');
+      this.queue = this.queue.filter(id => id !== 'alpha' && id !== 'hoarder').slice(0, keep - (boss ? 1 : 0) - (hoard ? 1 : 0));
       if (boss) this.queue.splice(Math.floor(this.queue.length * 0.7), 0, 'alpha');
+      if (hoard) this.queue.splice(Math.floor(this.queue.length * 0.5), 0, 'hoarder');
     }
     this.n = n;
     this.hpMul = hpMult(n, this.wave);

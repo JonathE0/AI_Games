@@ -5,7 +5,7 @@ import { moveCharacter, bottomAt, rayWorld, traceBullet, P } from '../shared/phy
 
 const { level: H, thick: T } = GRID;
 // ground-level slab ramp, tile (i=12,k=12) -> x:[0,4] z:[0,4] y:[0,3], rising toward +x (o=0)
-const ramp = pieceBox({ id: 1, kind: 'ramp', i: 12, k: 12, l: 0, o: 0, mat: 'wood' });
+const ramp = pieceBox({ id: 1, kind: 'ramp', i: 12, k: 12, l: 0, o: 0, mat: 'zink' });
 
 test('walking sideways under the high part of a slab ramp is not blocked', () => {
   const pos = [3.7, 0, -3], vel = [0, 0, 4];
@@ -47,7 +47,7 @@ test('jumping under a slab ramp bumps the head on the underside', () => {
   assert.ok(!grounded, 'a head bump should not count as landing');
 });
 
-test('rays under a slab ramp pass through; from above they hit the top, and a metal slab stops traceBullet', () => {
+test('rays under a slab ramp pass through; from above they hit the top, and a Zinkonium slab stops traceBullet', () => {
   const miss = rayWorld([3.8, 1.0, -2], [0, 0, 1], 10, [ramp]);
   assert.equal(miss, null, 'a ray under the high end should pass through the slab');
 
@@ -55,15 +55,15 @@ test('rays under a slab ramp pass through; from above they hit the top, and a me
   assert.ok(hit, 'a downward ray should hit the top surface');
   assert.ok(Math.abs(hit.t - 8.5) < 1e-6, `t=${hit.t}`);
 
-  const metalRamp = pieceBox({ id: 2, kind: 'ramp', i: 12, k: 12, l: 0, o: 0, mat: 'metal' });
-  const tr = traceBullet([2, 10, 2], [0, -1, 0], 20, [metalRamp], null, 2);
+  const zinkRamp = pieceBox({ id: 2, kind: 'ramp', i: 12, k: 12, l: 0, o: 0, mat: 'zink' });
+  const tr = traceBullet([2, 10, 2], [0, -1, 0], 20, [zinkRamp], null, 2);
   assert.equal(tr.player, null);
-  assert.ok(tr.endT < 20, `expected the bullet to stop on the metal ramp, endT=${tr.endT}`);
+  assert.ok(tr.endT < 20, `expected the bullet to stop on the Zinkonium ramp, endT=${tr.endT}`);
 });
 
 test('an elevated (level 1) slab ramp can still be walked under and climbed from a floor', () => {
-  const floor = pieceBox({ id: 3, kind: 'floor', i: 11, k: 12, l: 1, mat: 'wood' });
-  const elevated = pieceBox({ id: 4, kind: 'ramp', i: 12, k: 12, l: 1, o: 0, mat: 'wood' });
+  const floor = pieceBox({ id: 3, kind: 'floor', i: 11, k: 12, l: 1, mat: 'zink' });
+  const elevated = pieceBox({ id: 4, kind: 'ramp', i: 12, k: 12, l: 1, o: 0, mat: 'zink' });
   const boxes = [floor, elevated];
 
   const under = [1.5, 0, -3], underVel = [0, 0, 4];
@@ -80,7 +80,7 @@ test('an elevated (level 1) slab ramp can still be walked under and climbed from
 });
 
 test('walking up a level-0 ramp continues onto a level-1 floor in the next tile without a jump', () => {
-  const floor = pieceBox({ id: 5, kind: 'floor', i: 13, k: 12, l: 1, mat: 'wood' }); // the tile past the ramp's high end
+  const floor = pieceBox({ id: 5, kind: 'floor', i: 13, k: 12, l: 1, mat: 'zink' }); // the tile past the ramp's high end
   const boxes = [ramp, floor];
   const pos = [-0.05, 0, 2], vel = [3, 0, 0]; // horizontal velocity only: no jump
   let grounded = true;
@@ -101,8 +101,8 @@ test('a wedge (map-style ramp without thick) still blocks underneath like before
 // Like the real player loop: gravity every tick and `grounded` fed back from the previous call.
 test('walking with gravity up a ramp and onto the floor at its top never gets stuck at the lip', () => {
   const C = GRID.cell, H = GRID.level;
-  const ramp = pieceBox({ kind: 'ramp', i: 13, k: 14, l: 0, o: 3, mat: 'wood', id: 1 });
-  const floor = pieceBox({ kind: 'floor', i: 13, k: 13, l: 1, mat: 'wood', id: 2 });
+  const ramp = pieceBox({ kind: 'ramp', i: 13, k: 14, l: 0, o: 3, mat: 'zink', id: 1 });
+  const floor = pieceBox({ kind: 'floor', i: 13, k: 13, l: 1, mat: 'zink', id: 2 });
   const ground = { min: [-48, -1, -48], max: [48, 0, 48], mat: 'f' };
   const boxes = [ground, ramp, floor];
   const x = ramp.min[0] + C / 2, pos = [x, 0, ramp.max[2] + 1.5], vel = [0, 0, 0];

@@ -7,7 +7,7 @@ import { WEAPONS, BOSS_PERKS } from '/shared/weapons.js';
 import { AMMO, AMMO_IDS, ITEMS, ARMOR, ATTACH, CLASSES, ammoCap } from '/shared/holdout.js';
 import { ELEMENTS } from '/shared/elements.js';
 import { HOTBAR, INV_SIZE, STASH_SIZE, SACK_SIZE, ARMOR_SLOTS, TIERS, TIER_COLORS, magFor, gunMult, itemName, armorStats, damageReduction, tierCost } from '/shared/items.js';
-import { MAT_IDS } from '/shared/build.js';
+import { BMATS, MAT_IDS } from '/shared/build.js';
 import { itemLook, slotHTML } from './holdout_ui.js';
 
 const $ = id => document.getElementById(id);
@@ -71,7 +71,7 @@ export class InventoryUI {
     const sack = Array.from({ length: SACK_SIZE }, (_, k) => this.slot('k' + k, h.sack[k], `<b class="key">${sackKeys[k]}</b>`)).join('');
     const counters = [
       ...AMMO_IDS.map(t => `<span class="chip" style="--c:${AMMO[t].color}">${AMMO[t].name.replace(' Ammo', '')} <b>${h.ammo[t] || 0}</b><small>/${ammoCap(t, h.cls)}</small></span>`),
-      ...MAT_IDS.map(m => `<span class="chip mat ${m}">${m} <b>${h.mats[m] || 0}</b></span>`),
+      ...MAT_IDS.map(m => `<span class="chip mat ${m}">${BMATS[m].name} <b>${h.mats[m] || 0}</b></span>`),
       `<span class="chip money">$<b>${g.me.money}</b></span>`,
     ].join('');
     let chest = '';
@@ -79,7 +79,7 @@ export class InventoryUI {
       const s = h.stash, put = (cat, key, n, label, ok = true) => btn(label, { op: 'put', cat, key, n }, '', !ok), take = (cat, key, n, label, ok) => btn(label, { op: 'take', cat, key, n }, '', !ok);
       const rows = [
         `<div class="bagRow"><span>Bank <b>$${s.money}</b></span>${put('money', '', 500, 'Pool $500', g.me.money > 0)}${put('money', '', g.me.money, 'Pool all', g.me.money > 0)}${take('money', '', 500, 'Take $500', s.money > 0)}</div>`,
-        ...MAT_IDS.map(m => `<div class="bagRow"><span>${m} <b>${s.mats[m]}</b></span>${put('mats', m, 50, '+50', (h.mats[m] || 0) > 0)}${take('mats', m, 50, 'Take 50', s.mats[m] > 0)}</div>`),
+        ...MAT_IDS.map(m => `<div class="bagRow"><span>${BMATS[m].name} <b>${s.mats[m]}</b></span>${put('mats', m, 50, '+50', (h.mats[m] || 0) > 0)}${take('mats', m, 50, 'Take 50', s.mats[m] > 0)}</div>`),
         ...AMMO_IDS.map(t => `<div class="bagRow"><span>${AMMO[t].name.replace(' Ammo', '')} <b>${s.ammo[t]}</b></span>${put('ammo', t, AMMO[t].pack, `+${AMMO[t].pack}`, (h.ammo[t] || 0) > 0)}${take('ammo', t, AMMO[t].pack, 'Take', s.ammo[t] > 0)}</div>`),
       ].join('');
       chest = `<div class="invChest"><h3>TEAM CHEST</h3><div class="grid">${grid(0, STASH_SIZE, 's', s.items || [])}</div><div class="pool">${rows}</div></div>`;

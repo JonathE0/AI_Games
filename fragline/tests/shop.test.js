@@ -161,9 +161,9 @@ test('team upgrades other than vitality still refresh the buyer\'s own money rig
 test('engineering raises new piece HP and growth rate, and rescales existing builds on level-up', () => {
   const room = started(new HoldoutRoom('SE', {}));
   const a = join(room, 'A'), p = a.player;
-  p.mats.wood = 500;
+  p.mats.zink = 500;
   p.st.p = [0, 0, -6];
-  room.handle(p, { t: 'build', kind: 'wall', ...tile(-4, -8), l: 0, o: 0, mat: 'wood' });
+  room.handle(p, { t: 'build', kind: 'wall', ...tile(-4, -8), l: 0, o: 0, mat: 'zink' });
   const [wall] = room.builds();
   const maxHp0 = wall.maxHp, hp0 = wall.hp, rate0 = wall.rate;
 
@@ -176,7 +176,7 @@ test('engineering raises new piece HP and growth rate, and rescales existing bui
 
   T += 200;
   p.st.p = [0, 0, -6];
-  room.handle(p, { t: 'build', kind: 'wall', ...tile(-4, -4), l: 0, o: 0, mat: 'wood' });
+  room.handle(p, { t: 'build', kind: 'wall', ...tile(-4, -4), l: 0, o: 0, mat: 'zink' });
   const fresh = room.builds().find(s => s !== wall);
   assert.ok(fresh.rate > rate0, 'new pieces grow faster with engineering upgraded');
   assert.ok(fresh.maxHp > maxHp0, 'new pieces get more max HP with engineering upgraded');
@@ -291,26 +291,26 @@ test('pickups despawn after 4 minutes (8 minutes for boss loot)', () => {
   assert.ok(!room.inventory.pickups.has(boss.id), 'boss loot despawned at 8 minutes');
 });
 
-test('stacking: a second element infusion adds on top (and costs more metal), both apply on a hit', () => {
+test('stacking: a second element infusion adds on top (and costs more Zinkonium), both apply on a hit', () => {
   const room = started(new HoldoutRoom('SQ', {}));
   const a = join(room, 'A'), p = a.player;
   room.bosses.smith = true;
   p.money = 100000;
-  p.mats.metal = 500;
+  p.mats.zink = 500;
   p.st.p = [SMITH.x, 0, SMITH.z];
   const gun = p.inv[1] = makeGun('ar');
 
   room.handle(p, { t: 'smith', op: 'infuse', uid: gun.uid, el: 'fire' });
   assert.deepEqual(gun.els, ['fire']);
   assert.equal(gun.el, 'fire', 'el stays the first element');
-  const spentFirst = 500 - p.mats.metal;
+  const spentFirst = 500 - p.mats.zink;
 
-  const beforeSecond = p.mats.metal;
+  const beforeSecond = p.mats.zink;
   room.handle(p, { t: 'smith', op: 'infuse', uid: gun.uid, el: 'ice' });
   assert.deepEqual(gun.els, ['fire', 'ice'], 'adds on, never replaces');
   assert.equal(gun.el, 'fire', 'el is still the first element');
-  const spentSecond = beforeSecond - p.mats.metal;
-  assert.ok(spentSecond > spentFirst, 'the second infusion costs more metal');
+  const spentSecond = beforeSecond - p.mats.zink;
+  assert.ok(spentSecond > spentFirst, 'the second infusion costs more Zinkonium');
 
   room.handle(p, { t: 'smith', op: 'infuse', uid: gun.uid, el: 'fire' });
   assert.deepEqual(gun.els, ['fire', 'ice'], 'already infused with fire: denied, not duplicated');

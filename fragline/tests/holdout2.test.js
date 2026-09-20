@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeGun, addItem, countOf } from '../server/holdout/inventory.js';
-import { HoldoutRoom } from '../server/holdout/room.js';
+import { HoldoutRoom, HOLDOUT } from '../server/holdout/room.js';
 import { GRID, pieceBoxes, validMask, doorOf } from '../shared/build.js';
 import { AMMO, ITEMS, intermissionFor, MONEY_CAP } from '../shared/holdout.js';
 import { SKY, skyPoint } from '../shared/skyboss.js';
@@ -29,14 +29,14 @@ test('edits: doors, windows, floor holes and half ramps change what collides', (
   assert.equal(doorOf(1 << 4), null);                 // a window is not a door
   assert.equal(validMask('wall', 511), false);        // can't remove everything
   assert.equal(validMask('ramp', 3), false);
-  const wall = { id: 1, kind: 'wall', ...tile(-4, -8), l: 0, o: 0, mat: 'wood', mask: door };
+  const wall = { id: 1, kind: 'wall', ...tile(-4, -8), l: 0, o: 0, mat: 'zink', mask: door };
   const boxes = pieceBoxes(wall);
   assert.equal(boxes.filter(b => b.door).length, 1);
   const d = boxes.find(b => b.door);
   assert.ok(Math.abs(d.min[0] - (-4 + 4 / 3)) < 1e-9 && Math.abs(d.max[1] - 2) < 1e-9);
-  const floor = pieceBoxes({ id: 2, kind: 'floor', ...tile(-4, -8), l: 0, mat: 'wood', mask: 1 });
+  const floor = pieceBoxes({ id: 2, kind: 'floor', ...tile(-4, -8), l: 0, mat: 'zink', mask: 1 });
   assert.equal(floor.reduce((a, b) => a + (b.max[0] - b.min[0]) * (b.max[2] - b.min[2]), 0), 12); // 3 of 4 quarters
-  const half = pieceBoxes({ id: 3, kind: 'ramp', ...tile(-4, -8), l: 0, o: 0, mat: 'wood', mask: 1 })[0];
+  const half = pieceBoxes({ id: 3, kind: 'ramp', ...tile(-4, -8), l: 0, o: 0, mat: 'zink', mask: 1 })[0];
   assert.equal(half.max[2] - half.min[2], 2);
   assert.ok(half.ramp);
 });
@@ -45,7 +45,7 @@ test('server edits: zombies walk through openings but must break doors', () => {
   const room = started(new HoldoutRoom('E', {}));
   const a = join(room, 'A');
   a.player.st.p = [0, 0, -6];
-  room.handle(a.player, { t: 'build', kind: 'wall', ...tile(-4, -8), l: 0, o: 0, mat: 'metal' });
+  room.handle(a.player, { t: 'build', kind: 'wall', ...tile(-4, -8), l: 0, o: 0, mat: 'zink' });
   const s = room.builds()[0];
   advance(room, 8000);
   const cellCost = () => { room.flow.update(room.aliveNodeBoxes(), [...room.pieces.values()]); return room.flow.cost[room.flow.idx(-3.5, -7.5)]; };
@@ -98,11 +98,11 @@ test('team chest pools money and resources; team powerups can be paid from the b
   a.player.money = 5000; b.player.money = 3000;
   room.handle(a.player, { t: 'stash', op: 'put', cat: 'money', n: 3000 });
   room.handle(b.player, { t: 'stash', op: 'put', cat: 'money', n: 2500 });
-  room.handle(a.player, { t: 'stash', op: 'put', cat: 'mats', key: 'wood', n: 100 });
+  room.handle(a.player, { t: 'stash', op: 'put', cat: 'mats', key: 'zink', n: 100 });
   assert.equal(room.inventory.stash.money, 5500);
-  assert.equal(b.last('stash').s.mats.wood, 100);
-  room.handle(b.player, { t: 'stash', op: 'take', cat: 'mats', key: 'wood', n: 60 });
-  assert.equal(b.player.mats.wood, 260);
+  assert.equal(b.last('stash').s.mats.zink, 100);
+  room.handle(b.player, { t: 'stash', op: 'take', cat: 'mats', key: 'zink', n: 60 });
+  assert.equal(b.player.mats.zink, HOLDOUT.startMats.zink + 60);
   room.handle(a.player, { t: 'buy', item: 'p_damage', bank: true });
   assert.ok(room.buffActive('damage'));
   assert.equal(room.inventory.stash.money, 500);
@@ -178,17 +178,17 @@ test('traps and turrets defend on their own; campfires heal and recharge shields
   const room = started(new HoldoutRoom('D', {}));
   const a = join(room, 'A'), p = a.player;
   p.st.p = [0, 0, -6];
-  room.handle(p, { t: 'build', kind: 'floor', ...tile(-4, -12), l: 0, mat: 'wood' });
+  room.handle(p, { t: 'build', kind: 'floor', ...tile(-8, -8), l: 0, mat: 'zink' }); // clear of the map's ruins and sandbags
   T += 500;
-  room.handle(p, { t: 'build', kind: 'wall', ...tile(4, -12), l: 0, o: 1, mat: 'wood' });
+  room.handle(p, { t: 'build', kind: 'wall', ...tile(0, -8), l: 0, o: 1, mat: 'zink' });
   const [floor, wall] = room.builds();
   addItem(p, 'spikes', 1); addItem(p, 'darts', 1); addItem(p, 'campfire', 1);
   room.handle(p, { t: 'place', item: 'spikes', pid: floor.id });
   room.handle(p, { t: 'place', item: 'darts', pid: wall.id, side: 1 });
-  room.handle(p, { t: 'place', item: 'campfire', ...tile(0, -8) });
+  room.handle(p, { t: 'place', item: 'campfire', ...tile(0, -8) }); // in reach, clear of the Core block
   assert.equal(room.defenses.list.size, 3);
   room.startWave(1); room.director.queue = [];
-  const onSpikes = zombieAt(room, -2, -10), byDarts = zombieAt(room, 5.2, -10);
+  const onSpikes = zombieAt(room, -6, -6), byDarts = zombieAt(room, 1.2, -6);
   for (const z of [onSpikes, byDarts]) { z.hp = z.maxHp = 5000; z.frozenUntil = T + 60000; }
   advance(room, 3000);
   assert.ok(onSpikes.hp < 5000 - 100, 'spikes');

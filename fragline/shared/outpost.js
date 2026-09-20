@@ -1,6 +1,8 @@
 // "Outpost" — the Zombie Holdout map: a 96 m field with the Core in the middle, four lanes (N/E/S/W)
 // where the horde enters, a ring of ruined walls with gates ~26 m out, a shack in every corner and
 // harvestable trees, rocks and wrecked cars. One quarter (north lane + NE corner) is rotated 4x.
+// Each quarter also gets one distinct ruin out past the ring — a collapsed apartment block, a gutted
+// gas station, a toppled bus or a watchtower — so all four corners of the map read as overgrown ruin.
 // Entry: [minX, minY, minZ, maxX, maxY, maxZ, material] (bullet penetration per material in shared/physics.js MAT_RESIST).
 
 const CENTER = [
@@ -17,6 +19,8 @@ const QUARTER = [
   // low cover and crates
   [-3, 0, -14.3, 3, 1.1, -13.7, 'c'],
   [8, 0, -19, 9.2, 1.2, -17.8, 'w'], [9.2, 0, -19, 10.4, 2.4, -17.8, 'w'], [-10, 0, -34, -8.8, 1.2, -32.8, 'w'],
+  // sandbag barricade line screening the inner path, split so the lane through the middle stays open
+  [-9, 0, -11.7, -4, 0.75, -11.1, 'w'], [4, 0, -11.7, 9, 0.75, -11.1, 'w'],
   // corner shack: door facing the Core, window to the west
   [27, 0, -36, 33, 3, -35.7, 'd'],
   [27, 0, -30.3, 29.2, 3, -30, 'd'], [30.8, 0, -30.3, 33, 3, -30, 'd'], [29.2, 2.3, -30.3, 30.8, 3, -30, 'd'],
@@ -38,6 +42,30 @@ const RUIN = [
   [14, 0, -13.4, 19, 1.2, -13, 'c'], [16.5, 0, -16.5, 17.3, 3.2, -15.7, 'c'],
 ];
 
+// One more ruin in the open pocket between the ring and the corner shack — a different building per
+// quarter (they never coexist, so all four share the same footprint). Chest/shelter spots below sit inside them.
+const APARTMENT = [ // collapsed apartment block: one facade still up, the rest fell into rubble
+  [26, 0, -26.5, 35.2, 4.2, -25.9, 'c'],
+  [26, 0, -25.9, 26.6, 1.6, -20.5, 'c'], [34.6, 0, -25.9, 35.2, 2.6, -20, 'c'],
+  [30, 0, -22.5, 33, 1.2, -21.7, 'c'],
+  [27, 1.6, -23.5, 34.6, 1.9, -22, 'h'], // fallen floor slab resting on the rubble
+];
+const GAS_STATION = [ // gutted kiosk with its canopy still standing over the pumps
+  [26, 0, -22.5, 30, 2.6, -20.4, 'c'],
+  [27, 3, -26.5, 35, 3.3, -20.5, 'h'],
+  [27.7, 0, -26.1, 28.3, 3, -25.5, 'h'], [33.7, 0, -26.1, 34.3, 3, -25.5, 'h'],
+];
+const BUS = [ // a toppled bus, torn open along the roof
+  [27, 0, -23.5, 35, 2.4, -20.9, 'h'],
+  [27, 2.4, -23, 28.5, 3.4, -21.5, 'h'],
+];
+const WATCHTOWER = [ // a wooden lookout post, platform overhead so it never blocks the ground
+  [30, 0, -22.5, 32, 3.6, -20.5, 'd'],
+  [28.5, 3.6, -24, 33.5, 4.0, -19.5, 'd'],
+  [30, 4.0, -22.5, 32, 5.6, -20.5, 'w'],
+];
+const EXTRAS = [APARTMENT, GAS_STATION, BUS, WATCHTOWER];
+
 // harvestable nodes of one quarter: [type, x, z, rot] (cars: rot 0 = long along z, 1 = along x)
 const QUARTER_NODES = [
   ['tree', 20, -42], ['tree', 24, -39], ['tree', 36, -42], ['tree', 41, -37], ['tree', 38, -26], ['tree', 43, -31],
@@ -49,22 +77,23 @@ const QUARTER_NODES = [
   ['rubble', -22, -19.5], ['pallet', 9, -10], ['rubble', 29.5, -12.5],
 ];
 
-// mat = what harvesting yields; hits = knife hits until depleted; per = yield per hit
+// mat = what harvesting yields (always Zinkonium); hits = knife hits until depleted; per = yield per hit
 export const NODE_TYPES = {
-  tree: { mat: 'wood', hits: 10, per: 12, box: 'w' },
-  rock: { mat: 'stone', hits: 10, per: 8, box: 'c' },
-  car: { mat: 'metal', hits: 12, per: 6, box: 'm' },
-  crate: { mat: 'wood', hits: 4, per: 10, box: 'w' },
-  barrel: { mat: 'metal', hits: 4, per: 6, box: 'm' },
-  rubble: { mat: 'stone', hits: 5, per: 7, box: 'c' },
-  pallet: { mat: 'wood', hits: 3, per: 8, box: 'w' },
+  tree: { mat: 'zink', hits: 10, per: 12, box: 'w' },
+  rock: { mat: 'zink', hits: 10, per: 8, box: 'c' },
+  car: { mat: 'zink', hits: 12, per: 6, box: 'm' },
+  crate: { mat: 'zink', hits: 4, per: 10, box: 'w' },
+  barrel: { mat: 'zink', hits: 4, per: 6, box: 'm' },
+  rubble: { mat: 'zink', hits: 5, per: 7, box: 'c' },
+  pallet: { mat: 'zink', hits: 3, per: 8, box: 'w' },
 };
 // half extents [x, z] and height of each node's collision box
 const NODE_SIZE = { tree: [0.4, 0.4, 5], rock: [1.1, 0.9, 1.3], crate: [0.6, 0.6, 1.2], barrel: [0.4, 0.4, 1.1], rubble: [0.8, 0.7, 0.7], pallet: [0.6, 0.5, 0.6] };
 
-// chest spots per quarter (house/ruin, shack, outdoors) and the shack where wounded survivors wait
-const QUARTER_CHESTS = [[16.8, -17.3], [28.6, -34.6], [-10.6, -31.4], [34.5, -11.5]];
-const QUARTER_SHELTER = [30.4, -32.6];
+// chest spots per quarter (house/ruin, shack, the new EXTRAS ruin, outdoors) and shelters where wounded
+// survivors wait (corner shack, and one inside the new EXTRAS ruin)
+const QUARTER_CHESTS = [[16.8, -17.3], [28.6, -34.6], [-10.6, -31.4], [34.5, -11.5], [32, -24.5]];
+const QUARTER_SHELTERS = [[30.4, -32.6], [29, -24.5]];
 
 // quarter turn: (x, z) -> (-z, x)  (north -> east -> south -> west)
 const turn = (x, z, q) => { for (let i = 0; i < q; i++) [x, z] = [-z, x]; return [x, z]; };
@@ -85,15 +114,16 @@ const BANKER_BOX = { min: [4.5, 0, -5.0], max: [5.9, 0.9, -4.2], mat: 'm' };
 export const OUTPOST_STATIC = [...CENTER.map(toBox), CORE_BASE, STASH_BOX, BANKER_BOX];
 export { BANKER_BOX };
 
-// Breakable map props (walls, cover, crates, shacks, houses, ruins): HP and what harvesting them yields.
+// Breakable map props (walls, cover, crates, shacks, houses, ruins): HP and what harvesting them yields
+// (always Zinkonium).
 export const PROP_TYPES = {
-  w: { name: 'crate', hp: 150, mat: 'wood' },
-  d: { name: 'wall', hp: 300, mat: 'wood' },
-  h: { name: 'roof', hp: 250, mat: 'metal' },
-  c: { name: 'concrete', hp: 900, mat: 'stone' },
+  w: { name: 'crate', hp: 150, mat: 'zink' },
+  d: { name: 'wall', hp: 300, mat: 'zink' },
+  h: { name: 'roof', hp: 250, mat: 'zink' },
+  c: { name: 'concrete', hp: 900, mat: 'zink' },
 };
 export const OUTPOST_PROPS = [0, 1, 2, 3]
-  .flatMap(q => [...QUARTER, ...(q % 2 ? RUIN : HOUSE)].map(b => turnBox(b, q)))
+  .flatMap(q => [...QUARTER, ...(q % 2 ? RUIN : HOUSE), ...EXTRAS[q]].map(b => turnBox(b, q)))
   .map((b, id) => ({ id, box: toBox(b), hp: PROP_TYPES[b[6]].hp }));
 
 export const OUTPOST_BOXES = [...OUTPOST_STATIC, ...OUTPOST_PROPS.map(p => p.box)];
@@ -106,7 +136,7 @@ export const OUTPOST_NODES = [0, 1, 2, 3].flatMap(q => QUARTER_NODES.map(([type,
 })).map((n, id) => { n.id = id; n.box.node = id; return n; });
 
 export const OUTPOST_CHESTS = [0, 1, 2, 3].flatMap(q => QUARTER_CHESTS.map(([x, z]) => turn(x, z, q))).map(([x, z], id) => ({ id, x, z }));
-export const OUTPOST_SHELTERS = [0, 1, 2, 3].map(q => { const [x, z] = turn(...QUARTER_SHELTER, q); return { id: q, x, z }; });
+export const OUTPOST_SHELTERS = [0, 1, 2, 3].flatMap(q => QUARTER_SHELTERS.map(([x, z]) => turn(x, z, q))).map(([x, z], id) => ({ id, x, z }));
 // the Maw's seismic thumpers (wave 15): inside the two houses and one corner shack
 export const THUMPER_SPOTS = [[15.5, -15.8, 0], [15.5, -15.8, 2], [30.2, -33.2, 1]].map(([x, z, q], id) => { const [tx, tz] = turn(x, z, q); return { id, x: tx, z: tz }; });
 

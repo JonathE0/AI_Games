@@ -28,6 +28,14 @@ const LOOK = {
   golem: { skin: [0x2b2f35], shirt: [0x3a3f46, 0x343841], pants: 0x22262c, eye: 0xff8a2a, fist: 0xff8a2a, helmet: 0x4a4f57 },
   // red veins/aura, a pulsing marker above its head (holdout.js updateTags) instead of a helmet/accessory
   seeker: { skin: [0x5a1414], shirt: [0x3a0f0f], pants: 0x220a0a, eye: 0xff3030, aura: 0xff3030 },
+  // ---- the loot family (shared/zombies.js scavenger/warden/relic) ----
+  scavenger: { skin: [0x8a9a6a, 0x94a374], shirt: [0x5a6a3a, 0x4a5a3a], pants: 0x333a26, eye: 0xffe36b },
+  warden: { skin: [0x5a5f6a], shirt: [0x3a3f4a, 0x343a46], pants: 0x22262e, eye: 0x6bb0ff, helmet: 0x545c68 },
+  // glowing purple light instead of a helmet/accessory — epic-rarity purple, so it reads as "worth chasing"
+  relic: { skin: [0x4a3a5a], shirt: [0x2e2044], pants: 0x1c1530, eye: 0xc07bff, aura: 0xc07bff },
+  // the Hoarder: gold fists, gold eyes and a bulging gold sack of cash on its hip (see paint()'s sac color),
+  // plus a pulsing gold aura and trail (holdout.js hoarderTrail) — impossible to miss
+  hoarder: { skin: [0x6a5a3a], shirt: [0x4a3f2a], pants: 0x2a2318, eye: 0xffd700, fist: 0xffd700, sac: 0xffd700, aura: 0xffd700 },
   titan: { skin: [0x4a3a3a], shirt: [0x3a2020], pants: 0x1f1515, eye: 0xff5a2a, sac: 0xff7a2a },
   rider: { skin: [0x7a9a5a, 0x6f8f52], shirt: [0x4a5a2a], pants: 0x2a3322, eye: 0x9dff3d, sac: 0x9dff3d },
   broodsniper: { skin: [0x7a9a5a, 0x6f8f52], shirt: [0x3a4a2a], pants: 0x2a3322, eye: 0xff3030, acc: 'rifle', accColor: 0x2b2f35 },

@@ -28,10 +28,22 @@ export const ZTYPES = {
   // freezing aura that slows everyone around it; ice does nothing to it, fire hurts it more
   // wall breaker: paths straight at the Core ignoring piece costs (flowfield.js bstep) and smashes through
   // whatever is in its way at full sdmg (no group/global reduction), splashing 40% to nearby pieces too
-  golem: { id: 'golem', name: 'Iron Golem', weight: 3, hp: 1100, armor: 100, helmet: true, speed: 1.9, scale: 1.35, dmg: 28, sdmg: 520, reach: 2.2, windup: 1.2, cooldown: 2.2, reward: 450, cost: 7, from: 7, noVariant: true, breaker: true, deployOdds: 0.06 },
+  golem: { id: 'golem', name: 'Iron Golem', weight: 3, hp: 650, armor: 100, helmet: true, speed: 1.9, scale: 1.35, dmg: 28, sdmg: 520, reach: 2.2, windup: 1.2, cooldown: 2.2, reward: 450, cost: 7, from: 7, noVariant: true, breaker: true, deployOdds: 0.06 },
   // ignores players and survivors entirely; beelines the normal flow field for the Core and chips the Core
   // itself for a fixed amount per hit once it gets there (damageCore still applies CORE_ARMOR on top)
   seeker: { id: 'seeker', name: 'Core Seeker', weight: 0.8, hp: 240, speed: 3.3, scale: 0.95, dmg: 0, sdmg: 50, reach: 1.5, windup: 0.5, cooldown: 1.0, reward: 250, cost: 3, from: 5, noVariant: true, noAggro: true, cdmg: 140 },
+  // ---- the loot family: never worthless to kill (server/holdout/room.js typeDrop, shared/holdout.js ZDROPS) ----
+  // common: light and quick, a handful of ammo/materials or a cheap trap
+  scavenger: { id: 'scavenger', name: 'Scavenger', weight: 0.5, hp: 90, speed: 4.6, scale: 0.85, dmg: 9, sdmg: 14, reach: 1.4, windup: 0.4, cooldown: 0.85, reward: 70, cost: 1.1, from: 2 },
+  // uncommon: armored and tanky, a deployable/turret (deployOdds) or an armor piece (ZDROPS)
+  warden: { id: 'warden', name: 'Warden', weight: 3, hp: 500, armor: 80, helmet: true, speed: 2.1, scale: 1.25, dmg: 24, sdmg: 130, reach: 1.8, windup: 0.85, cooldown: 1.7, reward: 260, cost: 5, from: 6, deployOdds: 0.35 },
+  // rare: slow and glowing, a high-rarity gun (sometimes elemental) or a rare attachment — always marked so
+  // it's worth a detour (holdout.js updateTags/minimap 'RELIC BEARER')
+  relic: { id: 'relic', name: 'Relic Bearer', weight: 1.5, hp: 260, speed: 1.6, scale: 1.05, dmg: 14, sdmg: 35, reach: 1.5, windup: 0.7, cooldown: 1.5, reward: 320, cost: 4, from: 7, noVariant: true },
+  // the Hoarder: ignores players/survivors and sprints the flow field for the Core with a sack of cash.
+  // Killed first, it pays the whole squad (room.js hoarderPayout); if it reaches the Core it dives down a
+  // hole and escapes with nothing paid (ai.js strike -> room.js hoarderEscape). Spawn rules below.
+  hoarder: { id: 'hoarder', name: 'Hoarder', weight: 2, hp: 450, speed: 4.2, scale: 1.05, dmg: 10, sdmg: 55, reach: 1.6, windup: 0.6, cooldown: 1.5, reward: 0, cost: 0, from: 3, noVariant: true, noAggro: true, escape: true },
   // ---- flyers (server/holdout/flyers.js): airborne, ignore the ground flow field and every wall ----
   // circles high, screeches, dives at a player, climbs back; no projectiles, a big/easy hitbox to compensate
   swooper: { id: 'swooper', name: 'Swooper', weight: 0.6, hp: 150, speed: 9, scale: 1, dmg: 24, sdmg: 0, reach: 1.6, windup: 0.5, cooldown: 2.4, reward: 170, cost: 2.2, from: 8, noVariant: true, flyer: true },
@@ -66,6 +78,10 @@ export const ZDROPS = {
   sniper: { chance: 0.35, gun: w => (w >= 15 ? 'h_awp' : 'h_ssg') },
   stalker: { chance: 0.2, gun: 'blade' },
   bloater: { chance: 0.1, gun: 'gl' },
+  // ---- the loot family (server/holdout/room.js typeDrop) ----
+  scavenger: { chance: 0.9, kind: 'common' },                                   // ammo, materials or (usually) a cheap trap
+  warden: { chance: 0.55, kind: 'armor' },                                      // an armor piece (its deployOdds above also rolls a turret/trap)
+  relic: { chance: 1, kind: 'relic', gun: w => (w >= 15 ? 'h_awp' : 'h_ssg') }, // a high-rarity gun (sometimes elemental) or a rare attachment
 };
 
 export const WAVES = 10; // the old finale; waves now go on forever and simply keep getting harder
@@ -79,6 +95,12 @@ export const bossCycle = w => Math.max(0, Math.floor((w / 5 - 1) / BOSS_ROTATION
 export const alphaWave = w => w >= 12 && w % 4 === 0 && !bossFor(w);
 // night waves: a fifth of the time from wave 4, never with a boss
 export const nightRoll = (w, rng = Math.random) => w >= 4 && !bossFor(w) && rng() < 0.2;
+// the Hoarder: rare from wave 3, guaranteed alone on every 4th wave (4, 8, 12 …) regardless of a boss;
+// the rare (non-guaranteed) roll skips boss waves so it doesn't pile onto an already-hectic fight.
+export const hoarderGuaranteed = w => w >= 4 && w % 4 === 0;
+export const hoarderRoll = (w, rng = Math.random) => w >= 3 && !hoarderGuaranteed(w) && !bossFor(w) && rng() < 0.12;
+// what killing it before the Core pays the whole squad, not split (server/holdout/room.js hoarderPayout)
+export const hoarderCash = w => 1200 + 120 * w;
 export const AGGRO = 10;           // default melee aggro radius (needs line of sight)
 
 // Wave time limit: stops a horde being farmed forever. Grows with the wave, caps at 9 min, plus 4 extra
@@ -116,6 +138,7 @@ export function waveWeights(w, n, night = false) {
   spec('burrower', 0.8, 0.06); spec('shield', 0.5, 0.05); spec('pyro', 0.8, 0.06); spec('frost', 0.8, 0.06);
   spec('shade', 1.0, 0.08); spec('seeker', 0.8, 0.07); spec('golem', 0.15, 0.03); // golem: rarer than the Brute
   spec('swooper', 0.4, 0.05); spec('skysniper', 0.1, 0.015); // flyers: the Sky Sniper is rarer still
+  spec('scavenger', 1.3, 0.1); spec('warden', 0.5, 0.05); spec('relic', 0.12, 0.015); // loot family: common -> uncommon -> rare
   if (!night) for (const id of Object.keys(W)) if (ZTYPES[id].nightOnly) delete W[id];
   return W;
 }

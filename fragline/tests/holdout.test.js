@@ -80,32 +80,31 @@ test('mid-wave joins add zombies to what is left; leaving trims it', () => {
   assert.ok(room.director.remaining < grown);
 });
 
-test('building costs materials, grows, upgrades, repairs and can be demolished by its owner', () => {
+test('building costs materials, grows, repairs, refuses upgrades and can be demolished by its owner', () => {
   const room = new HoldoutRoom('ZOMB', { rng });
   const a = join(room, 'A'), b = join(room, 'B');
   a.player.st.p = [0, 0, -6];
-  room.handle(a.player, { t: 'build', kind: 'wall', ...tile(-4, -8), l: 0, o: 0, mat: 'wood' });
+  room.handle(a.player, { t: 'build', kind: 'wall', ...tile(-4, -8), l: 0, o: 0, mat: 'zink' });
   assert.equal(builds(room), 0, 'no building in the lobby');
   room.startPrep();
   a.player.st.p = [0, 0, -6];
-  room.handle(a.player, { t: 'build', kind: 'wall', ...tile(-4, -8), l: 0, o: 0, mat: 'wood' });
+  room.handle(a.player, { t: 'build', kind: 'wall', ...tile(-4, -8), l: 0, o: 0, mat: 'zink' });
   assert.equal(builds(room), 1);
-  assert.equal(a.player.mats.wood, HOLDOUT.startMats.wood - 10);
+  assert.equal(a.player.mats.zink, HOLDOUT.startMats.zink - 10);
   const s = room.builds()[0];
-  assert.ok(s.hp < 30);
-  advance(room, 2100);
-  assert.equal(Math.round(s.hp), 200);
-  room.handle(a.player, { t: 'build', kind: 'wall', ...tile(-4, -8), l: 0, o: 0, mat: 'wood' });
+  assert.ok(s.hp < 80, 'starts near 10% HP');
+  advance(room, 4100);
+  assert.equal(Math.round(s.hp), 750);
+  room.handle(a.player, { t: 'build', kind: 'wall', ...tile(-4, -8), l: 0, o: 0, mat: 'zink' });
   assert.equal(a.last('deny').text, 'Already built');
   room.handle(a.player, { t: 'upgrade', id: s.id });
-  assert.equal(s.mat, 'stone');
-  assert.equal(a.player.mats.stone, HOLDOUT.startMats.stone - 10);
-  advance(room, 4100);
-  assert.equal(Math.round(s.hp), 400);
+  assert.equal(s.mat, 'zink', 'one material — no upgrade path');
+  assert.equal(a.last('deny').text, "Zinkonium doesn't upgrade");
+  assert.equal(a.player.mats.zink, HOLDOUT.startMats.zink - 10, 'the upgrade attempt spent nothing');
   room.damagePiece(s, 100);
   T += 1000;
   room.handle(a.player, { t: 'repair', id: s.id });
-  assert.equal(Math.round(s.hp), 340);
+  assert.equal(Math.round(s.hp), 690);
   b.player.st.p = [0, 0, -6];
   room.handle(b.player, { t: 'demolish', id: s.id });
   assert.equal(b.last('deny').text, 'Only the builder can remove this');
@@ -120,16 +119,16 @@ test('harvesting needs the knife and depletes nodes', () => {
   a.player.st.p = [tree.x + 1.2, 0, tree.z];
   a.player.st.w = 'knife';
   room.handle(a.player, { t: 'harvest', id: tree.id });
-  assert.equal(a.player.mats.wood, HOLDOUT.startMats.wood, 'no harvesting before the game starts');
+  assert.equal(a.player.mats.zink, HOLDOUT.startMats.zink, 'no harvesting before the game starts');
   room.startPrep();
   a.player.st.p = [tree.x + 1.2, 0, tree.z];
   a.player.st.w = 'pistol';
   T += 300;
   room.handle(a.player, { t: 'harvest', id: tree.id });
-  assert.equal(a.player.mats.wood, HOLDOUT.startMats.wood);
+  assert.equal(a.player.mats.zink, HOLDOUT.startMats.zink);
   a.player.st.w = 'knife';
   for (let i = 0; i < 12; i++) { T += 300; room.handle(a.player, { t: 'harvest', id: tree.id, weak: i === 0 }); }
-  assert.equal(a.player.mats.wood, HOLDOUT.startMats.wood + 30 + 9 * 12);
+  assert.equal(a.player.mats.zink, HOLDOUT.startMats.zink + 30 + 9 * 12);
   assert.equal(room.nodes[tree.id].hp, 0);
 });
 
@@ -232,8 +231,8 @@ test('zombies walk to an undefended Core and hurt it; a sealed ring gets smashed
   const room2 = new HoldoutRoom('ZOMB', { rng });
   const b = join(room2, 'B');
   b.player.st.p = [0, 0, 60];
-  for (let x = -12; x < 12; x += 4) for (const [z, o] of [[-12, 0], [12, 0]]) room2.addPiece({ kind: 'wall', ...tile(x, z), l: 0, o, mat: 'wood' }, null);
-  for (let z = -12; z < 12; z += 4) for (const x of [-12, 12]) room2.addPiece({ kind: 'wall', ...tile(x, z), l: 0, o: 1, mat: 'wood' }, null);
+  for (let x = -12; x < 12; x += 4) for (const [z, o] of [[-12, 0], [12, 0]]) room2.addPiece({ kind: 'wall', ...tile(x, z), l: 0, o, mat: 'zink' }, null);
+  for (let z = -12; z < 12; z += 4) for (const x of [-12, 12]) room2.addPiece({ kind: 'wall', ...tile(x, z), l: 0, o: 1, mat: 'zink' }, null);
   advance(room2, 2500);
   room2.startWave(1);
   room2.director.queue = [];
@@ -251,7 +250,7 @@ test('AI step stays cheap with a full horde and a big fort', () => {
     if (n >= 300) break;
     const x = GRID.x0 + i * GRID.cell, z = GRID.z0 + k * GRID.cell;
     if (Math.hypot(x, z) > 26 || Math.hypot(x, z) < 8 || (i + k + l) % 3) continue;
-    room.addPiece({ kind: 'wall', i, k, l, o: (i + k) % 2, mat: 'wood' }, null);
+    room.addPiece({ kind: 'wall', i, k, l, o: (i + k) % 2, mat: 'zink' }, null);
     n++;
   }
   room.startWave(5);

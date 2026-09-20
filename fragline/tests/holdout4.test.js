@@ -172,8 +172,8 @@ test('kit perks: Tank takes less damage and builds faster, Assault buffs fire ra
   room.hurtPlayer(p, 100, null);
   assert.equal(p.maxHp - p.hp, Math.round(100 * (1 - CLASSES.tank.dr)), 'Tank takes 15% less damage');
 
-  const wallTank = room.addPiece({ kind: 'wall', ...tile(-4, -8), l: 0, o: 0, mat: 'wood' }, p);
-  const wallOther = room.addPiece({ kind: 'wall', ...tile(4, -8), l: 0, o: 0, mat: 'wood' }, { id: 'x', cls: null });
+  const wallTank = room.addPiece({ kind: 'wall', ...tile(-4, -8), l: 0, o: 0, mat: 'zink' }, p);
+  const wallOther = room.addPiece({ kind: 'wall', ...tile(4, -8), l: 0, o: 0, mat: 'zink' }, { id: 'x', cls: null });
   assert.ok(Math.abs(wallTank.rate / wallOther.rate - CLASSES.tank.buildMul) < 1e-9, 'Tank builds 25% faster');
 
   const q = join(room, 'B').player;

@@ -28,7 +28,7 @@ const started = room => { room.phase = 'prep'; return room; };
 
 test('zombies deal 45% damage to pieces, less still in a group, but the Core takes the full hit', () => {
   const room = started(new HoldoutRoom('Z1', {}));
-  const wall = room.addPiece({ kind: 'wall', ...tile(0, -8), l: 0, o: 0, mat: 'metal' }, null);
+  const wall = room.addPiece({ kind: 'wall', ...tile(0, -8), l: 0, o: 0, mat: 'zink' }, null);
   wall.hp = 100000;
   const zA = { id: 'a', t: {} }, zB = { id: 'b', t: {} };
   let hp = wall.hp;
@@ -54,8 +54,8 @@ test('Iron Golem: ignores both damage reductions, splashes 40% to nearby pieces,
   const room = started(new HoldoutRoom('Z2', {}));
   room.startWave(7); room.director.queue = [];
   for (const z of [...room.zombies.values()]) room.removeZombie(z);
-  room.addPiece({ kind: 'wall', ...tile(0, -12), l: 0, o: 0, mat: 'metal' }, null);
-  room.addPiece({ kind: 'wall', ...tile(4, -12), l: 0, o: 0, mat: 'metal' }, null);
+  room.addPiece({ kind: 'wall', ...tile(0, -12), l: 0, o: 0, mat: 'zink' }, null);
+  room.addPiece({ kind: 'wall', ...tile(4, -12), l: 0, o: 0, mat: 'zink' }, null);
   const [wallA, wallB] = room.builds();
   wallA.hp = wallA.maxHp = 100000; wallB.hp = wallB.maxHp = 100000;
   const g = room.spawnZombie('golem', 'N', '');
@@ -102,7 +102,7 @@ test('Iron Golem: ignores both damage reductions, splashes 40% to nearby pieces,
 
 test('Iron Golem: shrunk to fit under a level-1 floor, and attacks a floor/ramp pinning it down', () => {
   const h = 1.8 * ZTYPES.golem.scale;
-  const floorBox = pieceBox({ kind: 'floor', i: 0, k: 0, l: 1, mat: 'wood' });
+  const floorBox = pieceBox({ kind: 'floor', i: 0, k: 0, l: 1, mat: 'zink' });
   assert.ok(h < floorBox.min[1], `golem collision height ${h.toFixed(2)} clears a level-1 floor's underside ${floorBox.min[1].toFixed(2)}`);
   assert.equal(blocked(floorBox.min[0] + 2, 0, floorBox.min[2] + 2, h, [floorBox]), false, 'physically fits underneath, unlike the old 1.55 scale');
   assert.ok(1.8 * 1.55 > floorBox.min[1], 'sanity: the old scale would not have fit');
@@ -112,7 +112,7 @@ test('Iron Golem: shrunk to fit under a level-1 floor, and attacks a floor/ramp 
   for (const z of [...room.zombies.values()]) room.removeZombie(z);
   const g = room.spawnZombie('golem', 'N', '');
   g.pos = [0, 0, -10];
-  room.addPiece({ kind: 'floor', ...tile(0, -10), l: 1, mat: 'wood' }, null);
+  room.addPiece({ kind: 'floor', ...tile(0, -10), l: 1, mat: 'zink' }, null);
   const [floor] = room.builds();
   const hpBefore = floor.hp;
   let hit = false;
