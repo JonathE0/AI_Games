@@ -19,6 +19,7 @@ export const MAT_IDS = ['zink'];
 export const KINDS = ['wall', 'floor', 'ramp'];
 // ramp orientation o -> the direction its surface rises toward (+x, -x, +z, -z)
 export const RAMP_DIRS = [{ axis: 0, dir: 1 }, { axis: 0, dir: -1 }, { axis: 2, dir: 1 }, { axis: 2, dir: -1 }];
+export const TURN_ORDER = [0, 2, 1, 3]; // ramp directions in 90° steps
 
 // One slot per wall edge / floor tile / ramp tile per level. Walls: o = 0 runs along x on the tile's
 // north edge (z = z0), o = 1 runs along z on its west edge (x = x0); the far edges belong to the next tile.
@@ -195,4 +196,60 @@ export function checkPlacement(p, w) {
     return 'Needs support';
   }
   return null;
+}
+
+// ---------- aiming (the build ghost) ----------
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// Grid slot for an aimed point p: walls snap to the tile edge across your view, floors to the tile (up to one
+// level above your feet), ramps to the tile and rise away from you, `turn` quarter turns further.
+export function slotAtPoint(kind, p, dir, feetY, turn, mat) {
+  const C = GRID.cell, H = GRID.level, top = GRID.levels - 1;
+  const feetL = clamp(Math.floor((feetY + 0.6) / H), 0, top);
+  const fx = (p[0] - GRID.x0) / C, fz = (p[2] - GRID.z0) / C, alongX = Math.abs(dir[0]) > Math.abs(dir[2]);
+  let s;
+  if (kind === 'wall') {
+    const l = clamp(Math.floor((p[1] + 0.25) / H), 0, top);
+    s = alongX ? { kind: 'wall', o: 1, i: Math.round(fx), k: Math.floor(fz), l } : { kind: 'wall', o: 0, i: Math.floor(fx), k: Math.round(fz), l };
+  } else if (kind === 'floor') {
+    s = { kind: 'floor', o: 0, i: Math.floor(fx), k: Math.floor(fz), l: clamp(Math.round(p[1] / H), 0, Math.min(top, feetL + 1)) };
+  } else {
+    const facing = alongX ? (dir[0] > 0 ? 0 : 1) : (dir[2] > 0 ? 2 : 3);
+    s = { kind: 'ramp', o: TURN_ORDER[(TURN_ORDER.indexOf(facing) + turn) % 4], i: Math.floor(fx), k: Math.floor(fz), l: clamp(feetL + (p[1] > (feetL + 1) * H ? 1 : 0), 0, top) };
+  }
+  s.mat = mat;
+  return s;
+}
+
+// Only these move the ghost; anything else (already built, blocked, Core, zone, materials) keeps it where you
+// aim, so aiming at your own wall never jumps it somewhere else.
+const FALLBACK = ['Needs support', 'Too far away', 'Out of bounds'];
+
+// The build ghost: the slot under the crosshair or, when that one floats, is out of reach or off the grid, the
+// placeable slot along your aim closest to the aimed spot (Fortnite-style). Walks the ray back toward you, then
+// tries those slots one level lower at a time (looking up, the ray never gets low enough for a ground floor).
+// a = { kind, mat, turn, eye, dir, hitT (aim ray hit distance, or null), feet: [x, y, z] };
+// pending(slot) -> sent but not confirmed yet. Returns { slot, reason } (reason null when it can go down).
+export function aimBuildSlot(a, w, pending = () => false) {
+  const { eye, dir, feet } = a;
+  let t = a.hitT != null ? Math.max(0, a.hitT - 0.05) : 4.5;
+  if (eye[1] + dir[1] * t < 0.05 && dir[1] < -0.01) t = (eye[1] - 0.05) / -dir[1]; // aimed into the ground
+  const at = d => slotAtPoint(a.kind, eye.map((v, j) => v + dir[j] * d), dir, feet[1], a.turn, a.mat);
+  const slot = at(t), reason = checkPlacement(slot, w) || (pending(slot) ? 'Building…' : null);
+  if (!FALLBACK.includes(reason)) return { slot, reason };
+  const ray = [slot]; // the aim ray is 6.5 m, so at most ~25 samples
+  for (let d = t - 0.25; d >= 0.3; d -= 0.25) ray.push(at(d));
+  const cands = [...ray];
+  for (let drop = 1; drop < GRID.levels; drop++) for (const s of ray) if (s.l >= drop) cands.push({ ...s, l: s.l - drop });
+  const body = { min: [feet[0] - 0.4, feet[1], feet[2] - 0.4], max: [feet[0] + 0.4, feet[1] + 1.8, feet[2] + 0.4] };
+  const seen = new Set([slotKey(slot)]);
+  for (const s of cands) {
+    const k = slotKey(s);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const b = pieceBox(s), ax = s.o ? 0 : 2;
+    if (s.kind === 'wall' && ((b.min[ax] + b.max[ax]) / 2 - eye[ax]) * Math.sign(dir[ax]) < 0.5) continue; // never behind or through you
+    if (!overlaps(b, body) && !checkPlacement(s, w) && !pending(s)) return { slot: s, reason: null };
+  }
+  return { slot, reason };
 }

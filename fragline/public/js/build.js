@@ -3,7 +3,7 @@
 // grid snapping, turbo building, trap placement) and edit mode (Fortnite-style tile editing).
 // The server re-checks everything with the same shared rules (shared/build.js).
 import * as THREE from 'three';
-import { GRID, BMATS, MAT_IDS, KINDS, PIECE_COST, REACH, EDIT_GRID, RAMP_THICK, FLOOR_LIFT, pieceBox, pieceBoxes, slotKey, checkPlacement, validMask, doorOf, distToBox } from '/shared/build.js';
+import { GRID, BMATS, MAT_IDS, KINDS, PIECE_COST, REACH, EDIT_GRID, RAMP_THICK, FLOOR_LIFT, pieceBox, pieceBoxes, slotKey, aimBuildSlot, validMask, doorOf, distToBox } from '/shared/build.js';
 import { OUTPOST_NODES, NODE_TYPES } from '/shared/outpost.js';
 import { ITEMS, TRAPS, DEPLOYS } from '/shared/holdout.js';
 import { rayWorld, dirFromAngles } from '/shared/physics.js';
@@ -17,7 +17,6 @@ const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _v = new THREE.Vect
 const BLUEPRINT = new THREE.Color(0x8fd3ff), CHARRED = new THREE.Color(0x2a2520);
 const TEXNAME = { zink: 'plate' };
 const RAMP_YAW = [0, Math.PI, -Math.PI / 2, Math.PI / 2]; // rises toward +x, -x, +z, -z
-const TURN_ORDER = [0, 2, 1, 3];                           // ramp directions in 90° steps
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 function pieceGeometry(kind) {
@@ -403,28 +402,11 @@ export class BuildMode {
     return { eye, dir, hit: rayWorld(eye, dir, 6.5, this.g.boxes) };
   }
 
-  // Grid slot under the crosshair: walls snap to the tile edge across your view, floors to the tile you
-  // aim at (up to one level above your feet), ramps to the aimed tile and rise away from you.
+  // Grid slot for the ghost -> { slot, reason }: the one under the crosshair, or the nearest placeable one
+  // along your aim when that would float or is out of reach (shared/build.js aimBuildSlot).
   aimSlot() {
     const pl = this.g.player, { eye, dir, hit } = this.aim();
-    let p = eye.map((v, j) => v + dir[j] * (hit ? Math.max(0, hit.t - 0.05) : 4.5));
-    if (p[1] < 0.05 && dir[1] < -0.01) { const t = (eye[1] - 0.05) / -dir[1]; p = eye.map((v, j) => v + dir[j] * t); }
-    const feetL = clamp(Math.floor((pl.pos[1] + 0.6) / H), 0, GRID.levels - 1);
-    const fx = (p[0] - GRID.x0) / C, fz = (p[2] - GRID.z0) / C;
-    const alongX = Math.abs(dir[0]) > Math.abs(dir[2]);
-    let s;
-    if (this.kind === 'wall') {
-      const l = clamp(Math.floor((p[1] + 0.25) / H), 0, GRID.levels - 1);
-      s = alongX ? { kind: 'wall', o: 1, i: Math.round(fx), k: Math.floor(fz), l } : { kind: 'wall', o: 0, i: Math.floor(fx), k: Math.round(fz), l };
-    } else if (this.kind === 'floor') {
-      s = { kind: 'floor', o: 0, i: Math.floor(fx), k: Math.floor(fz), l: clamp(Math.round(p[1] / H), 0, Math.min(GRID.levels - 1, feetL + 1)) };
-    } else {
-      const facing = alongX ? (dir[0] > 0 ? 0 : 1) : (dir[2] > 0 ? 2 : 3);
-      const o = TURN_ORDER[(TURN_ORDER.indexOf(facing) + this.turn) % 4];
-      s = { kind: 'ramp', o, i: Math.floor(fx), k: Math.floor(fz), l: clamp(feetL + (p[1] > (feetL + 1) * H ? 1 : 0), 0, GRID.levels - 1) };
-    }
-    s.mat = this.mat;
-    return s;
+    return aimBuildSlot({ kind: this.kind, mat: this.mat, turn: this.turn, eye, dir, hitT: hit?.t, feet: pl.pos }, this.h.placementWorld(), s => this.sent.has(slotKey(s)));
   }
 
   // Where the selected trap / deployable would go: { pid, side, i, k, box (for the ghost), reason }
@@ -479,14 +461,14 @@ export class BuildMode {
         this.trapGhost.scale.set(...[0, 1, 2].map(i => Math.max(0.05, t.box.max[i] - t.box.min[i])));
       }
     } else {
-      const s = this.slot = this.aimSlot(), key = slotKey(s);
       for (const [k, t] of this.sent) if (now - t > 0.8) this.sent.delete(k);
-      this.reason = checkPlacement(s, this.h.placementWorld()) || (this.sent.has(key) ? 'Building…' : '');
+      const a = this.aimSlot(), s = this.slot = a.slot;
+      this.reason = a.reason || '';
       this.valid = !this.reason;
       const ghost = this.ghosts[this.kind];
       pieceTransform(s, ghost.matrix);
       ghost.matrixWorldNeedsUpdate = true;
-      if (firing && this.valid && now >= this.nextPlace && !g.ui) this.place(s, key);
+      if (firing && this.valid && now >= this.nextPlace && !g.ui) this.place(s, slotKey(s));
     }
     this.ghostMat.color.setHex(this.valid ? 0x4dc3ff : 0xff5a4e);
     this.ghostMat.opacity = this.valid ? 0.38 : 0.22;
