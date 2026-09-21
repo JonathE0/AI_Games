@@ -21,3 +21,8 @@ and how they were solved.
 - `npm test` must pass before a task is called done.
 - Browser checks use a debug server on port 3001; mute page audio while testing. The user's own server runs on
   port 3000 — restart it with the new code only when a task is finished.
+
+## Releasing
+- `origin` is https://github.com/JonathE0/zombie-holdout (branch `master`). Netlify builds the browser solo
+  version from it on every push (`netlify.toml` → `npm run build:static` → `dist/`), so pushing is deploying.
+- After pushing, mirror the tracked files into `../AI_Games/fragline/` and commit + push that repo too.
