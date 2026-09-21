@@ -21,6 +21,9 @@ and how they were solved.
 - `npm test` must pass before a task is called done.
 - Browser checks use a debug server on port 3001; mute page audio while testing. The user's own server runs on
   port 3000 — restart it with the new code only when a task is finished.
+- Other apps of the user (e.g. a Mahjong club app) also use ports 3000/3001. Before killing whatever listens on a
+  port, check its command line is this project's `node server.js` (Fragline folder); if the port belongs to another
+  app, leave it alone and use a free port.
 
 ## Releasing
 - `origin` is https://github.com/JonathE0/zombie-holdout (branch `master`). Netlify builds the browser solo
