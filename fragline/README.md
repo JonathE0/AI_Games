@@ -1,9 +1,13 @@
-# Fragline — Zombie Holdout
+# Zombie Holdout
 
 A co-op browser survival shooter for 1–4 players: build, harvest and defend the Core against endless,
 ever-harder zombie waves (see below). It plays like a Source-engine CS2/Valorant shooter under the hood —
 movement, per-weapon spray patterns, hitbox damage, wallbangs — repurposed for horde defense instead of
 round-based duels. Runs in the browser; a tiny Node server hosts the page and the multiplayer rooms.
+
+**Play solo in your browser, no install:** https://zombie-holdout.netlify.app — the whole game, server
+included, runs on your own machine (the game server runs in a Web Worker), and the site rebuilds from this
+repo on every push, so it's always the latest version. Co-op needs the Node server below.
 
 ## Run it
 
@@ -31,6 +35,17 @@ Playing with a friend:
   No router setup; the link changes each run and works while your PC, server and tunnel are running.
   Prefer private rooms: anyone with the link can open the game. (Alternatives: port-forward TCP 3000, or
   deploy to Render/Railway/Fly.io for an always-on URL — the server honors `PORT`.)
+
+## The browser (solo) version
+
+`npm run build:static` writes a static site to `dist/`: the client, the shared code and the room logic,
+which the page starts in a Web Worker instead of connecting to a server. `netlify.toml` has Netlify run that
+build and publish `dist/` on every push, with caching off so players always get the newest build. The build
+fails if any module the page or the worker imports is missing from `dist/`.
+
+To give the hosted page co-op, run the Node server somewhere always on (Render, Fly.io, a VPS — it honors
+`PORT`) and set `HOLDOUT_SERVER_URL` (e.g. `wss://your-server.example.com`) in Netlify's environment
+variables. Play and Join then use that server instead of solo mode.
 
 ## Controls
 

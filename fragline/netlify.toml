@@ -1,0 +1,18 @@
+# Static solo build: no game server, the Holdout room runs in a Web Worker in the player's browser.
+[build]
+  command = "npm run build:static"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+[[headers]]
+  for = "/sounds/list"
+  [headers.values]
+    Content-Type = "application/json"
+
+# revalidate every file so players always get the latest build
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"

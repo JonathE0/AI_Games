@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { HoldoutRoom } from './server/holdout/room.js';
+import { cleanName } from './server/baseRoom.js';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = +process.env.PORT || 3000;
@@ -69,7 +70,7 @@ wss.on('connection', ws => {
     try { m = JSON.parse(raw); } catch { return; }
     if (room) return room.handle(player, m);
     if (m.t !== 'hello') return;
-    const name = String(m.name || '').replace(/[<>&"]/g, '').trim().slice(0, 16) || 'Player';
+    const name = cleanName(m.name);
     if (m.mode === 'join') {
       const code = String(m.code || '').toUpperCase().trim();
       const r = rooms.get(code);

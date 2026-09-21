@@ -1,6 +1,6 @@
 ---
 name: fragline-builder
-description: Sonnet implementer for Fragline. The main session (Opus) is the architect — it plans, designs the interfaces and reviews; hand this agent the heavy programming (new modules, multi-file features, refactors, bulk edits, test writing, balance tweaks) with a precise spec. Use it for most implementation work on this project.
+description: Implementer for Fragline (Sonnet by default; the architect passes model opus for heavy tasks). The main session (Opus) is the architect — it plans, designs the interfaces and reviews; hand this agent the heavy programming (new modules, multi-file features, refactors, bulk edits, test writing, balance tweaks) with a precise spec. Use it for most implementation work on this project.
 model: sonnet
 tools: Read, Edit, Write, Grep, Glob, Bash, PowerShell
 ---

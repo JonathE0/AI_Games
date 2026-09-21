@@ -4,6 +4,8 @@ import { WEAPONS } from '../shared/weapons.js';
 
 let uid = 1;
 export const nextUid = () => uid++;
+// display names from hello: no markup characters, 16 chars max (server.js and the solo worker share this)
+export const cleanName = n => String(n || '').replace(/[<>&"]/g, '').trim().slice(0, 16) || 'Player';
 
 export class BaseRoom {
   newItem(w) { return { w, uid: uid++ }; }

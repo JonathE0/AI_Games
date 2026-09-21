@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/css/style.css">
+<script src="/config.js"></script>
 <script type="importmap">{ "imports": { "three": "/lib/three/build/three.module.js", "three/addons/": "/lib/three/examples/jsm/" } }</script>
 </head>
 <body>
@@ -113,9 +114,10 @@
     <p class="tag">Zombie Holdout · co-op survival</p>
     <label>Name <input id="nameInput" maxlength="16" placeholder="Your name"></label>
     <div class="row"><button id="btnPlay" class="primary zombie">Play</button></div>
+    <p class="pauseHint" id="soloNote" hidden>Solo in your browser — co-op needs the self-hosted server (<a href="https://github.com/JonathE0/zombie-holdout" target="_blank" rel="noopener">see GitHub</a>)</p>
     <p class="tag">1–4 players · endless waves · build · harvest · defend the Core</p>
     <p class="best" id="hoBest"></p>
-    <div class="row"><input id="codeInput" placeholder="CODE" maxlength="4"><button id="btnJoin">Join Room</button></div>
+    <div class="row" id="joinRow"><input id="codeInput" placeholder="CODE" maxlength="4"><button id="btnJoin">Join Room</button></div>
     <div id="menuMsg"></div>
     <details class="controls">
       <summary>Controls</summary>

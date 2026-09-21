@@ -7,7 +7,7 @@ import { World } from './world.js';
 import { Sound } from './audio.js';
 import { Hud, BUILD_ACTIONS } from './hud.js';
 import { Input } from './input.js';
-import { Net } from './net.js';
+import { Net, SOLO } from './net.js';
 import { LocalPlayer } from './player.js';
 import { Weapons } from './weapons.js';
 import { ViewModel } from './models.js';
@@ -99,9 +99,10 @@ export class Game {
     $('hud').hidden = false;
     $('menuMsg').textContent = '';
     const local = /^(localhost|127\.|\[::1\])/.test(location.hostname); // on a tunnel/public URL, share that URL
-    $('roomInfo').innerHTML = `Zombie Holdout · endless waves · up to ${m.maxPlayers} players<br>Room code <b>${this.code}</b><br>Invite link: <b>${local ? `http://&lt;your-ip&gt;:${location.port || 80}` : location.origin}/#${this.code}</b>`;
+    $('roomInfo').innerHTML = SOLO ? 'Zombie Holdout · endless waves · solo in your browser' // no code to share: the room lives in this tab
+      : `Zombie Holdout · endless waves · up to ${m.maxPlayers} players<br>Room code <b>${this.code}</b><br>Invite link: <b>${local ? `http://&lt;your-ip&gt;:${location.port || 80}` : location.origin}/#${this.code}</b>`;
     if (!document.pointerLockElement) this.input.lock();
-    this.hud.chat(null, `Joined room ${this.code} — friends join with this code`);
+    if (!SOLO) this.hud.chat(null, `Joined room ${this.code} — friends join with this code`);
     // scenic entry: orbit high above the map, then swoop into your eyes (first join only)
     this.intro = { start: this.now, dur: 4.2, a0: null };
     $('hud').classList.add('intro');

@@ -406,24 +406,25 @@ export class HoldoutRoom extends BaseRoom {
     if (now - this.rosterAt >= 1000) { this.rosterAt = now; this.broadcastRoster(); }
   }
 
-  // Binary horde snapshot: [u8 1, u8 0, u16 count, f64 time] + per zombie
+  // Binary horde snapshot (little-endian): [u8 1, u8 0, u16 count, f64 time] + per zombie
   // [u16 id, i16 x·100, i16 y·100, i16 z·100, i16 yaw·10000, u8 state (4 = frozen), u8 hp/max·255,
   //  u8 status (1 burning, 2 soaked, 4 chilled, 8 underground, 16 shield up, 32 marked, 64 berserk), u8 spare] (14 bytes).
+  // A plain ArrayBuffer (no Node Buffer) so the room also runs in the browser's solo worker.
   sendSnapshot(now) {
-    const buf = Buffer.alloc(12 + this.zombies.size * 14);
-    buf.writeUInt8(1, 0);
-    buf.writeUInt16LE(this.zombies.size, 2);
-    buf.writeDoubleLE(now, 4);
+    const buf = new ArrayBuffer(12 + this.zombies.size * 14), v = new DataView(buf);
+    v.setUint8(0, 1);
+    v.setUint16(2, this.zombies.size, true);
+    v.setFloat64(4, now, true);
     let o = 12;
     for (const z of this.zombies.values()) {
-      buf.writeUInt16LE(z.id, o);
-      buf.writeInt16LE(clamp16(z.pos[0] * 100), o + 2);
-      buf.writeInt16LE(clamp16(z.pos[1] * 100), o + 4);
-      buf.writeInt16LE(clamp16(z.pos[2] * 100), o + 6);
-      buf.writeInt16LE(clamp16(wrap(z.yaw) * 10000), o + 8);
-      buf.writeUInt8(now < (z.frozenUntil || 0) ? 4 : z.state, o + 10);
-      buf.writeUInt8(Math.max(0, Math.min(255, Math.round((z.hp / z.maxHp) * 255))), o + 11);
-      buf.writeUInt8((z.burnUntil > now ? 1 : 0) | (z.soakUntil > now ? 2 : 0) | (z.chillAt && now - z.chillAt < 3000 && z.chill > 0 ? 4 : 0) | (z.under ? 8 : 0) | (z.t.shield && now >= (z.shieldDown || 0) ? 16 : 0) | (z.markUntil > now ? 32 : 0) | (z.berserk ? 64 : 0), o + 12);
+      v.setUint16(o, z.id, true);
+      v.setInt16(o + 2, clamp16(z.pos[0] * 100), true);
+      v.setInt16(o + 4, clamp16(z.pos[1] * 100), true);
+      v.setInt16(o + 6, clamp16(z.pos[2] * 100), true);
+      v.setInt16(o + 8, clamp16(wrap(z.yaw) * 10000), true);
+      v.setUint8(o + 10, now < (z.frozenUntil || 0) ? 4 : z.state);
+      v.setUint8(o + 11, Math.max(0, Math.min(255, Math.round((z.hp / z.maxHp) * 255))));
+      v.setUint8(o + 12, (z.burnUntil > now ? 1 : 0) | (z.soakUntil > now ? 2 : 0) | (z.chillAt && now - z.chillAt < 3000 && z.chill > 0 ? 4 : 0) | (z.under ? 8 : 0) | (z.t.shield && now >= (z.shieldDown || 0) ? 16 : 0) | (z.markUntil > now ? 32 : 0) | (z.berserk ? 64 : 0));
       o += 14;
     }
     for (const p of this.players) if (p.ws && p.ws.readyState === 1) p.ws.send(buf);
@@ -1301,7 +1302,7 @@ export class HoldoutRoom extends BaseRoom {
       case 'class': return this.onClass(p, m);
       case 'thump': return this.bosses.onThump(p, m);
       case 'smith': return this.smith.handle(p, m);
-      case 'ping': return this.onPing(p, m);
+      case 'ping': return 'ts' in m ? this.handleCommon(p, m) : this.onPing(p, m); // net latency ping (ts) vs map ping (x/z)
       default: this.handleCommon(p, m);
     }
   }
