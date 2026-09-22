@@ -3,7 +3,7 @@
 // class kit perks + kit-change gating, and the Medic's reworked wave kit.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeGun, addItem, countOf } from '../server/holdout/inventory.js';
+import { makeGun, addItem } from '../server/holdout/inventory.js';
 import { HoldoutRoom, HOLDOUT } from '../server/holdout/room.js';
 import { CLASSES, ITEMS } from '../shared/holdout.js';
 import { ZTYPES, dmgMult } from '../shared/zombies.js';
@@ -109,7 +109,7 @@ test('Colossus chest snipers: one SSG per player in the team chest, one grab eac
   const room2 = started(new HoldoutRoom('CS2', {}));
   const c = join(room2, 'C');
   const items2 = room2.inventory.stash.items;
-  for (let i = 0; i < items2.length; i++) items2[i] = { uid: -100 - i, id: 'bandage', kind: 'item', n: 1 };
+  for (let i = 0; i < items2.length; i++) items2[i] = { uid: -100 - i, id: 'adrenaline', kind: 'adrenaline', n: 1 };
   items2[0] = { uid: -1, id: 'rocket', kind: 'gun', r: 4, tier: 3, el: null };
   room2.wave = 4; room2.waveCleared();
   assert.equal(items2[0]?.id, 'rocket', 'the most valuable item was kept');
@@ -164,7 +164,7 @@ test('kit changes: free in prep, locked mid-wave and off-cycle, open again every
   assert.equal(p.cls, 'medic');
 });
 
-test('kit perks: Tank takes less damage and builds faster, Assault buffs fire rate after a kill, Medic items heal harder', () => {
+test('kit perks: Tank takes less damage and builds faster, Assault buffs fire rate after a kill, Medic Adrenaline Shots heal harder', () => {
   const room = started(new HoldoutRoom('KIT', {}));
   const a = join(room, 'A'), p = a.player;
   room.phase = 'wave';
@@ -183,26 +183,11 @@ test('kit perks: Tank takes less damage and builds faster, Assault buffs fire ra
   assert.ok(q.assaultBuffUntil > Date.now(), 'a fire-rate window opens after a kill');
 
   const m = join(room, 'M').player;
-  m.cls = 'medic'; m.hp = 50; m.maxHp = 200;
-  addItem(m, 'bandage', 1);
-  room.handle(m, { t: 'use', item: 'bandage' });
-  assert.equal(m.hp, 50 + (ITEMS.bandage.hp / 100) * m.maxHp * CLASSES.medic.healMul, 'a Medic\'s bandage heals 25% more');
-});
-
-test('medic wave rewards: a medkit every 2 waves instead of every wave, plus shield regen near the Core', () => {
-  const room = started(new HoldoutRoom('MK', {}));
-  const a = join(room, 'A'), p = a.player;
-  p.cls = 'medic';
-  room.wave = 1; room.waveCleared();
-  assert.equal(countOf(p, 'medkit'), 0, 'no medkit after an odd wave');
-  assert.equal(countOf(p, 'bandage'), 0, 'no more free bandages every wave');
-  room.wave = 2; room.waveCleared();
-  assert.equal(countOf(p, 'medkit'), 1, 'a medkit every 2 waves');
-
-  p.st.p = [0, 0, 0]; p.shield = 0;
-  const before = p.shield;
-  advance(room, 2000);
-  assert.ok(p.shield > before, 'a Medic regenerates shield inside the buy radius');
+  m.cls = 'medic'; m.hp = 50; m.maxHp = 200; m.shield = 0;
+  addItem(m, 'adrenaline', 1);
+  room.handle(m, { t: 'use', item: 'adrenaline' });
+  assert.equal(m.hp, 50 + ITEMS.adrenaline.hp * CLASSES.medic.healMul, 'a Medic\'s shot heals 25% more');
+  assert.equal(m.shield, ITEMS.adrenaline.sh * CLASSES.medic.healMul, 'and shields 25% more');
 });
 
 test('the buy ring grew to 11.7m and the Banker still sits well inside it', () => {

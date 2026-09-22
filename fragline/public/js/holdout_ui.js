@@ -1,7 +1,7 @@
 // Zombie Holdout panels: the six-slot hotbar, the Core shop and the per-browser best-wave record. Pure HTML
 // builders — holdout.js wires the buttons. (The inventory grid lives in inventory_ui.js.)
 import { WEAPONS, BOSS_PERKS } from '/shared/weapons.js';
-import { RARITY, AMMO, ITEMS, POWERUPS, SHOP, ARMOR, CLASSES, CLASS_IDS, SMITH, TURRET_TYPES, ATTACH, ATTACH_IDS, TEAM_UPS, TEAM_UP_IDS, CORE_UPS, CORE_UP_IDS, SHOP_RARITY, coreUpPrice, shopEntry, ammoCap, elementPrice, rarityCost, sellPrice } from '/shared/holdout.js';
+import { RARITY, AMMO, ITEMS, POWERUPS, SHOP, ARMOR, CLASSES, CLASS_IDS, SMITH, TURRET_TYPES, ATTACH, ATTACH_IDS, TEAM_UPS, TEAM_UP_IDS, CORE_UPS, CORE_UP_IDS, SHOP_RARITY, ADREN_CARRY, coreUpPrice, shopEntry, ammoCap, elementPrice, rarityCost, sellPrice } from '/shared/holdout.js';
 import { ELEMENTS, ELEMENT_IDS } from '/shared/elements.js';
 import { HOTBAR, INV_SIZE, SACK_SIZE, TIERS, TIER_COLORS, ARMOR_SLOTS, magFor, gunMult, itemName, tierCost } from '/shared/items.js';
 import { gunIcon, gunGlyph, gunIconKind, uiIcon } from './icons.js';
@@ -14,22 +14,23 @@ export function itemLook(it) {
   if (!it) return { label: '', color: 'transparent' };
   if (it.kind === 'gun') return { label: WEAPONS[it.id]?.short || it.id, color: RARITY[it.r ?? 0].color, el: it.el ? ELEMENTS[it.el].color : null, tier: it.tier ?? 1, icon: gunIconKind(it.id) };
   if (it.kind === 'armor') return { label: ARMOR[it.id]?.name ?? it.id, color: TIER_COLORS[it.tier ?? 1], tier: it.tier ?? 1 };
-  return { label: itemName(it), color: { throw: '#7fbf5a', heal: '#e05a5a', shield: '#5a9cff', adrenaline: '#ff7a5a', trap: '#b8a58a', deploy: '#c9a24a', attach: '#9aa4ad' }[it.kind] ?? '#9aa4ad', n: it.n };
+  return { label: itemName(it), color: { throw: '#7fbf5a', adrenaline: '#ff7a5a', trap: '#b8a58a', deploy: '#c9a24a', attach: '#9aa4ad' }[it.kind] ?? '#9aa4ad', n: it.n };
 }
 
 // a small lock badge — shared by the inventory grid, the hotbar's HUD row and the Banker panel
-const lockBadge = it => (it?.locked ? '<i class="lock" title="Locked — press L to unlock"></i>' : '');
+const lockBadge = (it, key = 'L') => (it?.locked ? `<i class="lock" title="Locked — press ${key} to unlock"></i>` : '');
 
 // a colored item tile — shared by the inventory grid, the hotbar's HUD row and the Banker panel. The icon (if
-// any) sits above the name so long names never overlap it — see .hasIcon in style.css.
-export function slotHTML(ref, it, sel = false, extra = '') {
+// any) sits above the name so long names never overlap it — see .hasIcon in style.css. lockKey: the bound
+// flashlight/lock key, for the lock badge's tooltip.
+export function slotHTML(ref, it, sel = false, extra = '', lockKey = 'L') {
   const look = itemLook(it);
   const tier = look.tier ? `<i class="tier" style="color:${TIER_COLORS[look.tier]}">${TIERS[look.tier].name}</i>` : '';
   const el = look.el ? `<i class="el" style="background:${look.el}"></i>` : '';
   const n = look.n > 1 ? `<i class="n">${look.n}</i>` : '';
   const icon = look.icon ? `<div class="art">${gunGlyph(look.icon, look.color)}</div>` : '';
   const uid = it ? ` data-uid="${it.uid}"` : '';
-  return `<div class="slot${it ? '' : ' empty'}${sel ? ' sel' : ''}${icon ? ' hasIcon' : ''}" data-ref="${ref}"${uid} style="--rc:${look.color}">${extra}${tier}${el}${lockBadge(it)}${icon}<span>${esc(look.label)}</span>${n}</div>`;
+  return `<div class="slot${it ? '' : ' empty'}${sel ? ' sel' : ''}${icon ? ' hasIcon' : ''}" data-ref="${ref}"${uid} style="--rc:${look.color}">${extra}${tier}${el}${lockBadge(it, lockKey)}${icon}<span>${esc(look.label)}</span>${n}</div>`;
 }
 
 // ---------- hotbar ----------
@@ -44,20 +45,19 @@ export function hotbarHTML(h) {
     const tier = look.tier ? `<i class="tier" style="color:${TIER_COLORS[look.tier]}">${TIERS[look.tier].name}</i>` : '';
     const el = look.el ? `<i class="el" style="background:${look.el}"></i>` : '';
     const icon = look.icon ? `<div class="art">${gunGlyph(look.icon, look.color)}</div>` : '';
-    slots.push(`<div class="hb${W.slot === s ? ' on' : ''}${it ? '' : ' empty'}" style="--rc:${look.color}"><b>${keys[s - 1]}</b>${tier}${el}${lockBadge(it)}${icon}<span>${esc(look.label)}</span><em>${sub}</em></div>`);
+    slots.push(`<div class="hb${W.slot === s ? ' on' : ''}${it ? '' : ' empty'}" style="--rc:${look.color}"><b>${keys[s - 1]}</b>${tier}${el}${lockBadge(it, h.key('flashlight'))}${icon}<span>${esc(look.label)}</span><em>${sub}</em></div>`);
   }
   slots.push(`<div class="hb knife${W.slot === 0 ? ' on' : ''}"><b>${keys[HOTBAR]}</b><span>Harvest</span><em>knife</em></div>`);
-  const th = h.activeThrow, heals = ['bandage', 'medkit', 'shield_s', 'shield'].reduce((n, id) => n + (h.items[id] || 0), 0);
-  slots.push(`<div class="util"><span><b>T</b> ${th ? `${esc(ITEMS[th].name)} ×${h.items[th] || 0} <small>N: next</small>` : 'no throwables'}</span><span><b>H</b> heal ×${heals}</span><span><b>E</b>/<b>I</b> inventory</span></div>`);
+  const th = h.activeThrow;
+  slots.push(`<div class="util"><span><b>${h.key('throw')}</b> ${th ? `${esc(ITEMS[th].name)} ×${h.items[th] || 0} <small>${h.key('nextThrow')}: next</small>` : 'no throwables'}</span><span><b>${h.key('backpack')}</b> inventory</span></div>`);
   return slots.join('') + sackHTML(h);
 }
 
 // the 4-slot consumables sack, shown beside the hotbar
-const SACK_KEYS = ['7', '8', '9', '0'];
 function sackHTML(h) {
   return `<div class="sack">${Array.from({ length: SACK_SIZE }, (_, i) => {
     const it = h.sack[i], look = itemLook(it);
-    return `<div class="hb sk${it ? '' : ' empty'}" style="--rc:${look.color}"><b>${SACK_KEYS[i]}</b>${lockBadge(it)}<span>${esc(look.label)}</span><em>${it ? `×${it.n ?? 1}` : ''}</em></div>`;
+    return `<div class="hb sk${it ? '' : ' empty'}" style="--rc:${look.color}"><b>${h.key('sack' + (i + 1))}</b>${lockBadge(it, h.key('flashlight'))}<span>${esc(look.label)}</span><em>${it ? `×${it.n ?? 1}` : ''}</em></div>`;
   }).join('')}</div>`;
 }
 
@@ -67,18 +67,16 @@ function gunStats(w) {
   const base = `${dmg} dmg · ${w.rpm} rpm · ${w.mag} mag · ${AMMO[w.ammo] ? AMMO[w.ammo].name.replace(' Ammo', '') : 'melee'}`;
   return w.boss ? `${base} · ${BOSS_PERKS[w.id]}` : base;
 }
-function itemDesc(id) {
+export function itemDesc(id, throwKey = 'T') {
   const it = ITEMS[id];
-  if (it.kind === 'heal') return `+${it.hp}% HP (up to ${it.cap}%) · ${it.time}s · also heals survivors`;
-  if (it.kind === 'shield') return `+${it.sh} shield (up to ${it.cap}) · ${it.time}s`;
-  if (it.kind === 'adrenaline') return `Instant +${it.hp} HP (overflows to shield) · +${it.regen}/s for ${it.time}s · +${Math.round((it.dmgMult - 1) * 100)}% dmg · +${Math.round((it.speedMult - 1) * 100)}% speed`;
-  if (it.kind === 'throw') return id === 'grenade' ? 'Big blast · T to throw' : id === 'molotov' ? 'Burning pool · T to throw' : 'Freezes zombies 4s · T to throw';
-  return {
-    spikes: 'Floor trap · build mode', darts: 'Wall trap · build mode', flame: 'Floor trap · build mode', campfire: 'Heals and recharges shields nearby · build mode',
-    turret: 'Auto machine gun · build mode', rturret: 'Rocket turret · build mode', gturret: 'High fire rate, low damage, chews ammo · build mode',
-    frturret: 'Chills and slows what it hits · build mode', flturret: 'Short-range fire cone · build mode', tesla: 'Arcs to nearby zombies · build mode',
-    mortar: 'Long range splash, can\'t hit anything close · build mode',
-  }[id];
+  if (it.kind === 'adrenaline') return `Instant +${it.hp} HP and +${it.sh} shield · +${it.regen} HP/s for ${it.time}s`;
+  if (it.kind === 'throw') return id === 'grenade' ? `Big blast · ${throwKey} to throw` : id === 'molotov' ? `Burning pool · ${throwKey} to throw` : `Freezes zombies 4s · ${throwKey} to throw`;
+  return `${{
+    spikes: 'Floor trap', darts: 'Wall trap', flame: 'Floor trap', campfire: 'Heals and recharges shields nearby',
+    turret: 'Auto machine gun', rturret: 'Rocket turret', gturret: 'High fire rate, low damage, chews ammo',
+    frturret: 'Chills and slows what it hits', flturret: 'Short-range fire cone', tesla: 'Arcs to nearby zombies',
+    mortar: 'Long range splash, can\'t hit anything close',
+  }[id]} · place with your ${it.kind === 'trap' ? 'trap' : 'turret'} key`;
 }
 function armorDesc(id) {
   const a = ARMOR[id], bits = [`${a.def[1]} armor`];
@@ -95,7 +93,7 @@ export const TABS = [['shop', 'SHOP', 'shop'], ['upgrades', 'UPGRADES', 'upgrade
 // One flat page: the SHOP categories from shared/holdout.js grouped under four banded section headers.
 const SECTIONS = [
   ['GUNS', 'guns', ['Pistols & SMGs', 'Rifles', 'Shotguns & Heavy', 'Snipers']],
-  ['SUPPLIES', 'supplies', ['Ammo', 'Throwables', 'Healing', 'Adrenaline']],
+  ['SUPPLIES', 'supplies', ['Ammo', 'Throwables', 'Adrenaline']],
   ['BUILD', 'build', ['Traps', 'Turrets & Deployables']],
   ['ARMOR', 'armor', ['Armor']],
 ];
@@ -105,7 +103,7 @@ function shopCardHTML(id, h, money) {
   let sub, disabled = false, cls = '', name = e.name;
   if (e.kind === 'gun') { const w = WEAPONS[id]; sub = gunStats(w); if (w.skin) name = `${w.name} | ${w.skin}`; }
   else if (e.kind === 'ammo') { const n = h.ammo[e.type] || 0, cap = ammoCap(e.type, h.cls); sub = `have ${n} / ${cap}`; disabled = n >= cap; }
-  else if (e.kind === 'item') { const n = h.items[id] || 0, it = ITEMS[id]; sub = `${itemDesc(id)} · have ${n}`; disabled = n >= it.max * 2; }
+  else if (e.kind === 'item') { const n = h.items[id] || 0, it = ITEMS[id], cap = id === 'adrenaline' ? ADREN_CARRY : it.max * 2; sub = `${itemDesc(id, h.key('throw'))} · have ${n}`; disabled = n >= cap; }
   else if (e.kind === 'armor') { const on = h.armor[ARMOR[id].slot]?.id === id; sub = (on ? 'WEARING · ' : '') + armorDesc(id); }
   else { const on = h.buffLeft(id) > 0; sub = on ? 'ACTIVE' : POWERUPS[id].desc; disabled = on; cls = 'power'; }
   const poor = e.price > money;
@@ -204,18 +202,18 @@ function bankStatLine(it, h) {
   }
   if (it.kind === 'armor') { const a = ARMOR[it.id], t = it.tier ?? 1; return `${a.slot} · ${a.def[t]} armor`; }
   if (it.kind === 'attach') return ATTACH[it.id].desc;
-  return itemDesc(it.id);
+  return itemDesc(it.id, h.key('throw'));
 }
 export function bankHTML(h) {
-  const keys = h.hotkeys(), money = h.g.me.money;
-  const hot = Array.from({ length: HOTBAR }, (_, k) => slotHTML('i' + k, h.inv[k], h.bankSel === 'i' + k, `<b class="key">${keys[k]}</b>`)).join('');
-  const back = Array.from({ length: INV_SIZE - HOTBAR }, (_, k) => slotHTML('i' + (HOTBAR + k), h.inv[HOTBAR + k], h.bankSel === 'i' + (HOTBAR + k))).join('');
-  const sack = Array.from({ length: SACK_SIZE }, (_, k) => slotHTML('k' + k, h.sack[k], h.bankSel === 'k' + k)).join('');
+  const keys = h.hotkeys(), money = h.g.me.money, lockKey = h.key('flashlight');
+  const hot = Array.from({ length: HOTBAR }, (_, k) => slotHTML('i' + k, h.inv[k], h.bankSel === 'i' + k, `<b class="key">${keys[k]}</b>`, lockKey)).join('');
+  const back = Array.from({ length: INV_SIZE - HOTBAR }, (_, k) => slotHTML('i' + (HOTBAR + k), h.inv[HOTBAR + k], h.bankSel === 'i' + (HOTBAR + k), '', lockKey)).join('');
+  const sack = Array.from({ length: SACK_SIZE }, (_, k) => slotHTML('k' + k, h.sack[k], h.bankSel === 'k' + k, '', lockKey)).join('');
   const it = h.bankSel && bankItem(h, h.bankSel);
-  const sellBtn = it && (it.locked ? '<span class="muted">Locked — press L to unlock</span>' : `<button class="mini sellBtn" data-sell="${it.uid}">Sell for $${sellPrice(it)}</button>`);
+  const sellBtn = it && (it.locked ? `<span class="muted">Locked — press ${lockKey} to unlock</span>` : `<button class="mini sellBtn" data-sell="${it.uid}">Sell for $${sellPrice(it)}</button>`);
   const info = it
     ? `<b style="color:${itemLook(it).color}">${esc(itemName(it))}</b><div class="s">${bankStatLine(it, h)}</div>${sellBtn}`
-    : '<span class="muted">Click an item to inspect it · shift-click a tile to sell it instantly · hover a tile and press L to lock/unlock it.</span>';
+    : `<span class="muted">Click an item to inspect it · shift-click a tile to sell it instantly · hover a tile and press ${lockKey} to lock/unlock it.</span>`;
   const bb = h.buyback ? `<div class="bankBB"><h3>BUY BACK</h3><div class="grid">${slotHTML('bb', h.buyback.item)}</div><button class="mini" data-buyback="1" ${h.buyback.price > money ? 'disabled' : ''}>${esc(itemName(h.buyback.item))} · $${h.buyback.price}</button></div>` : '';
   return `<div class="bank">
     <div class="bankMain">

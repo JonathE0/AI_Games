@@ -18,40 +18,68 @@ export const setHidden = (id, h) => { const k = id + '!hidden'; if (last[k] !== 
 // Forget cached values (after other code changed those elements directly).
 export const hudReset = () => { for (const k in last) delete last[k]; };
 
-// [action, label, default binding, default alternate binding]
+// [action, label, default binding, default alternate binding] in Settings order; the defaults are the right-handed preset
 export const ACTIONS = [
   ['forward', 'Forward', 'KeyW'], ['back', 'Back', 'KeyS'], ['left', 'Strafe left', 'KeyA'], ['right', 'Strafe right', 'KeyD'],
-  ['jump', 'Jump', 'Space'], ['crouch', 'Crouch', 'ControlLeft', 'KeyC'], ['walk', 'Walk', 'ShiftLeft'],
-  ['fire', 'Fire', 'Mouse0'], ['alt', 'Scope / knife stab', 'Mouse2'], ['reload', 'Reload', 'KeyR'], ['inspect', 'Inspect weapon', 'KeyF'],
-  ['primary', 'Primary weapon', 'Digit1'], ['secondary', 'Pistol', 'Digit2'], ['knife', 'Knife', 'Digit3'],
-  ['lastWeapon', 'Last weapon', 'KeyQ'], ['nextWeapon', 'Next weapon', 'WheelDown'], ['prevWeapon', 'Previous weapon', 'WheelUp'],
+  ['jump', 'Jump', 'Space'], ['crouch', 'Crouch', 'ControlLeft'],
+  ['fire', 'Fire', 'Mouse0'], ['alt', 'Scope / knife stab', 'Mouse2'], ['reload', 'Reload', 'KeyR'],
+  ['inspect', 'Harvest tool', 'KeyX'], // again while holding it: inspect
+  ['primary', 'Hotbar slot 1', 'Digit1'], ['secondary', 'Hotbar slot 2', 'Digit2'], ['knife', 'Hotbar slot 3', 'Digit3'],
+  ['slot4', 'Hotbar slot 4', 'Digit4'], ['slot5', 'Hotbar slot 5', 'Digit5'], ['slot6', 'Hotbar slot 6', 'Digit6'],
+  ['lastWeapon', 'Last weapon'], ['nextWeapon', 'Next weapon', 'WheelDown'], ['prevWeapon', 'Previous weapon', 'WheelUp'],
   ['buy', 'Buy menu', 'KeyB'], ['scoreboard', 'Scoreboard', 'Tab'], ['chat', 'Chat', 'Enter'],
-  ['build', 'Build mode (Holdout)', 'KeyG'], ['edit', 'Edit build (Holdout)', 'KeyV'], ['interact', 'Use / pick up / repair / revive (Holdout)', 'KeyE'],
-  ['demolish', 'Demolish piece (Holdout)', 'KeyX'], ['ready', 'Ready up (Holdout)', 'KeyY'],
-  ['slot4', 'Hotbar slot 4 (Holdout)', 'Digit4'], ['slot5', 'Hotbar slot 5 (Holdout)', 'Digit5'], ['slot6', 'Hotbar slot 6 (Holdout)', 'Digit6'],
-  ['throw', 'Throw grenade (Holdout)', 'KeyT'], ['nextThrow', 'Next throwable (Holdout)', 'KeyN'], ['heal', 'Heal / shield (Holdout)', 'KeyH'],
-  ['adrenaline', 'Adrenaline shot (Holdout)', 'KeyJ'],
-  ['sack1', 'Use sack item 1 (Holdout)', 'Digit7'], ['sack2', 'Use sack item 2 (Holdout)', 'Digit8'],
-  ['sack3', 'Use sack item 3 (Holdout)', 'Digit9'], ['sack4', 'Use sack item 4 (Holdout)', 'Digit0'],
-  ['flashlight', 'Flashlight / lock item in inventory (Holdout)', 'KeyL'],
-  ['backpack', 'Inventory (Holdout)', 'KeyI'], ['map', 'Full map · click to ping (Holdout)', 'KeyM'],
-  // Building: only while build mode is on, so these may share keys with the ones above
-  ['bWall', 'Wall', 'KeyQ'], ['bStair', 'Stair / ramp', 'KeyE'], ['bFloor', 'Floor', 'KeyF'],
-  ['bTrap', 'Trap (spikes, darts, flames)', 'KeyT'], ['bDeploy', 'Turret / Rally Fire', 'KeyZ'], ['bRotate', 'Rotate stair', 'KeyR'],
+  ['interact', 'Use / pick up / repair / revive', 'KeyE'], ['ready', 'Ready up', 'KeyY'],
+  ['throw', 'Throw grenade', 'KeyT'], ['nextThrow', 'Next throwable', 'KeyN'], ['adrenaline', 'Adrenaline shot', 'KeyH'],
+  ['sack1', 'Use sack item 1', 'Digit7'], ['sack2', 'Use sack item 2', 'Digit8'], ['sack3', 'Use sack item 3', 'Digit9'], ['sack4', 'Use sack item 4', 'Digit0'],
+  ['flashlight', 'Flashlight / lock item in inventory', 'KeyL'], ['backpack', 'Inventory', 'KeyI'], ['map', 'Full map · click to ping', 'KeyM'],
+  // Building (no build mode, like Fortnite's Builder Pro): a piece key starts building that piece from anywhere
+  ['bWall', 'Wall', 'KeyQ'], ['bFloor', 'Floor', 'KeyF'], ['bStair', 'Stair / ramp', 'KeyC'], ['bCone', 'Cone (roof)', 'ShiftLeft'],
+  ['bTrap', 'Trap (spikes, darts, flames)', 'KeyZ'], ['bDeploy', 'Turret / Rally Fire', 'KeyV'], ['bRotate', 'Rotate stair (while building)', 'KeyR'],
+  ['edit', 'Edit build', 'KeyG'],
 ];
-export const BUILD_ACTIONS = new Set(['bWall', 'bStair', 'bFloor', 'bTrap', 'bDeploy', 'bRotate']);
+// Left-handed preset: mouse in the left hand, keys on the right of the keyboard ('' = unbound)
+const LEFT_HANDED = {
+  forward: 'KeyO', back: 'KeyL', left: 'KeyK', right: 'Semicolon', jump: 'Space', crouch: ['ControlLeft', 'KeyC'],
+  fire: 'Mouse0', alt: 'Mouse2', reload: 'KeyU', inspect: 'KeyA',
+  primary: 'Minus', secondary: 'Digit0', knife: 'Digit9', slot4: 'Digit8', slot5: 'Digit7', slot6: 'Digit6',
+  lastWeapon: 'KeyQ', nextWeapon: 'WheelDown', prevWeapon: 'WheelUp', buy: 'BracketRight', scoreboard: 'Backslash', chat: '',
+  interact: 'KeyI', ready: 'KeyR', throw: 'KeyY', nextThrow: 'KeyN', adrenaline: 'KeyF',
+  sack1: 'Digit5', sack2: 'Digit4', sack3: 'Digit3', sack4: 'Digit2', flashlight: 'Equal', backpack: 'Enter', map: 'KeyZ',
+  bWall: 'KeyP', bFloor: 'KeyM', bStair: 'Comma', bCone: 'Period', bTrap: 'KeyT', bDeploy: 'KeyH', bRotate: 'KeyR', edit: 'KeyJ',
+};
+export const BUILD_ACTIONS = new Set(['bWall', 'bFloor', 'bStair', 'bCone', 'bTrap', 'bDeploy', 'bRotate']);
 const BIND_SECTIONS = [
-  ['General', id => !BUILD_ACTIONS.has(id) && !/\(Holdout\)/.test(ACTIONS.find(a => a[0] === id)[1])],
-  ['Zombie Holdout', id => /\(Holdout\)/.test(ACTIONS.find(a => a[0] === id)[1])],
-  ['Building — while build mode (G) is on', id => BUILD_ACTIONS.has(id)],
+  ['Keybinds', id => !BUILD_ACTIONS.has(id) && id !== 'edit'],
+  ['Building', id => BUILD_ACTIONS.has(id) || id === 'edit'],
 ];
 export const defaultBinds = () => Object.fromEntries(ACTIONS.map(([id, , a = '', b = '']) => [id, [a, b]]));
+export const leftHandedBinds = () => Object.fromEntries(Object.entries(LEFT_HANDED).map(([id, c]) => [id, Array.isArray(c) ? [...c] : [c, '']]));
+// 2: building keys work anytime, so they share one context with everything else — older saves would clash
+export const BINDS_VERSION = 2;
+// Saved binds over the defaults: actions that no longer exist are dropped, new ones keep their default keys.
+// Binds saved under an older BINDS_VERSION reset to the right-handed preset.
+export function loadBinds(saved, version) {
+  const binds = defaultBinds();
+  if (version !== BINDS_VERSION) return binds;
+  for (const [id, codes] of Object.entries(saved || {})) if (Object.hasOwn(binds, id) && Array.isArray(codes)) binds[id] = [codes[0] || '', codes[1] || ''];
+  return binds;
+}
+
+// Bind code to binds[id][i], clearing it from every other action (one key, one action). Rotate only acts while
+// building, so it may share a key (R with Reload, like Fortnite).
+const bindCtx = id => (id === 'bRotate' ? 2 : 1);
+export function setBind(binds, id, i, code) {
+  if (code) for (const a in binds) if (bindCtx(a) & bindCtx(id)) binds[a] = binds[a].map(c => (c === code ? '' : c));
+  binds[id][i] = code;
+}
 
 const KEY_NAMES = {
   Mouse0: 'Mouse 1', Mouse2: 'Mouse 2', Mouse1: 'Mouse 3', Mouse3: 'Mouse 4', Mouse4: 'Mouse 5',
   WheelUp: 'Wheel up', WheelDown: 'Wheel down', ControlLeft: 'L-Ctrl', ControlRight: 'R-Ctrl',
   ShiftLeft: 'L-Shift', ShiftRight: 'R-Shift', AltLeft: 'L-Alt', AltRight: 'R-Alt', CapsLock: 'Caps Lock',
   Backquote: '`', ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',
+  Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Backslash: '\\', Semicolon: ';', Quote: "'",
+  Comma: ',', Period: '.', Slash: '/',
 };
 export const keyName = code => !code ? '—' : KEY_NAMES[code] || code.replace(/^(Key|Digit)/, '').replace(/^Numpad/, 'Num ');
 
@@ -97,9 +125,11 @@ export class Hud {
     let stored = {};
     try { stored = JSON.parse(localStorage.getItem('fragline.settings') || '{}'); } catch { /* storage blocked */ }
     Object.assign(this.settings, stored);
-    this.settings.binds = defaultBinds();
-    for (const [id, codes] of Object.entries(stored.binds || {})) {
-      if (this.settings.binds[id] && Array.isArray(codes)) this.settings.binds[id] = [codes[0] || '', codes[1] || ''];
+    this.settings.binds = loadBinds(stored.binds, stored.bindsV);
+    this.settings.bindsV = BINDS_VERSION;
+    if (stored.binds && stored.bindsV !== BINDS_VERSION) { // once: the old binds clash with the anytime building keys
+      this.save();
+      $('menuMsg').textContent = 'Keybinds were reset for the new building keys — pick Left or Right handed in Settings → Key bindings';
     }
     this.buildSettings();
     this.applyCrosshair();
@@ -140,13 +170,16 @@ export class Hud {
     }
     root.insertAdjacentHTML('beforeend', `<h3>KEY BINDINGS</h3>
       <small>Click a slot, then press a key, mouse button or scroll the wheel. Esc cancels, Backspace clears.</small>
-      <div id="bindList"></div><button id="bindReset" class="bindReset">Reset keys to default</button>`);
-    $('bindReset').onclick = () => {
-      this.settings.binds = defaultBinds();
+      <div id="bindList"></div>
+      <div class="row"><button id="bindRight" class="bindReset">Right handed</button><button id="bindLeft" class="bindReset">Left handed</button></div>`);
+    const preset = binds => () => {
+      this.settings.binds = binds();
       this.save();
       this.onSettings(this.settings);
       this.renderBinds();
     };
+    $('bindRight').onclick = preset(defaultBinds);
+    $('bindLeft').onclick = preset(leftHandedBinds);
     this.renderBinds();
   }
 
@@ -160,12 +193,12 @@ export class Hud {
     const list = $('bindList');
     list.innerHTML = '';
     for (const [title, has] of BIND_SECTIONS) {
-      list.insertAdjacentHTML('beforeend', `<h4 class="bindHead">${title}</h4>`);
+      list.insertAdjacentHTML('beforeend', `<h4 class="bindHead">${esc(title)}</h4>`);
       for (const [id, label] of ACTIONS) {
         if (!has(id)) continue;
         const row = document.createElement('div');
         row.className = 'bindRow';
-        row.innerHTML = `<span>${label.replace(' (Holdout)', '')}</span>`;
+        row.innerHTML = `<span>${label}</span>`;
         for (const i of [0, 1]) {
           const b = document.createElement('button');
           b.className = 'bindBtn';
@@ -183,11 +216,7 @@ export class Hud {
     btn.classList.add('listening');
     this.requestKey(code => {
       if (code !== 'Escape') {
-        const val = code === 'Backspace' || code === 'Delete' ? '' : code;
-        const binds = this.settings.binds;
-        const ctx = a => BUILD_ACTIONS.has(a); // build keys only clash with other build keys
-        if (val) for (const a in binds) if (ctx(a) === ctx(id)) binds[a] = binds[a].map(c => (c === val ? '' : c)); // one key, one action
-        binds[id][i] = val;
+        setBind(this.settings.binds, id, i, code === 'Backspace' || code === 'Delete' ? '' : code);
         this.save();
         this.onSettings(this.settings);
       }

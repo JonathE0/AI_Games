@@ -1,8 +1,8 @@
 // Placed defenses: floor spikes and flame grills on built floors, wall darts on a wall face, the turret
 // family (auto/gatling/frost/rocket/flame/tesla/mortar) and campfires on the ground or on a floor. Traps
 // credit their owner with kills.
-import { DEFENSES, ITEMS } from '../../shared/holdout.js';
-import { GRID, REACH, distToBox, overlaps } from '../../shared/build.js';
+import { DEFENSES, ITEMS, SHIELD_CAP } from '../../shared/holdout.js';
+import { GRID, REACH, distToBox, overlaps, slotKey } from '../../shared/build.js';
 import { addItem, countOf, takeItem } from './inventory.js';
 
 const r2 = v => Math.round(v * 100) / 100;
@@ -34,6 +34,7 @@ export class Defenses {
       if (distToBox(eye, s.box) > REACH) return deny('Too far away');
       const slot = it.mount === 'floor' ? 0 : (m.side > 0 ? 1 : -1); // side: 0 floor top, ±1 wall face, 2 ground
       if ([...this.list.values()].some(x => x.pid === s.id && x.side === slot)) return deny('Already trapped');
+      if (it.mount === 'floor' && room.slots.has(slotKey({ ...s, kind: 'cone' }))) return deny('A cone is in the way');
       const b = s.box;
       if (it.mount === 'floor') {
         d = { pos: [(b.min[0] + b.max[0]) / 2, b.max[1], (b.min[2] + b.max[2]) / 2], area: { min: [b.min[0], b.max[1] - 0.2, b.min[2]], max: [b.max[0], b.max[1] + 1.6, b.max[2]] }, side: 0 };
@@ -93,7 +94,7 @@ export class Defenses {
         if (now >= d.until) { this.remove(d); continue; }
         if (now < d.next) continue;
         d.next = now + 500;
-        const heal = DEFENSES.campfire.heal * 0.5, shield = DEFENSES.campfire.shield * 0.5, shCap = ITEMS.shield.cap;
+        const heal = DEFENSES.campfire.heal * 0.5, shield = DEFENSES.campfire.shield * 0.5, shCap = SHIELD_CAP;
         for (const q of [...room.players, ...room.survivors.list.values()]) {
           if (!q.alive || q.downed || Math.hypot(q.st.p[0] - d.pos[0], q.st.p[2] - d.pos[2]) > DEFENSES.campfire.radius) continue;
           if (q.isSurvivor) { room.survivors.heal(q, heal * 3); continue; }

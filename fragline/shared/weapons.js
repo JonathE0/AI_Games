@@ -198,7 +198,7 @@ export const BOSS_PERKS = {
   cleaver: 'BOSS · knocks down everything it hits',
 };
 
-// Holdout: holding a non-gun hotbar item (grenade, medkit, trap…) — nothing to shoot, the item gets used.
+// Holdout: holding a non-gun hotbar item (grenade, adrenaline shot, trap…) — nothing to shoot, the item gets used.
 def('hold_item', { mode: 'hold', name: 'Item', short: 'Item', cat: 'item', model: 'item', slot: 1, price: 0, reward: 0,
   dmg: 0, pen: 0, range: 1, rpm: 120, mag: 0, reserve: 0, reload: 0, deploy: 0.25, speed: 6.2 });
 

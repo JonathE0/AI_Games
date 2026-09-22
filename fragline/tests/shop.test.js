@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addItem, countOf, makeGun } from '../server/holdout/inventory.js';
+import { addItem, makeGun } from '../server/holdout/inventory.js';
 import { HoldoutRoom } from '../server/holdout/room.js';
 import { GRID } from '../shared/build.js';
 import { HOTBAR } from '../shared/items.js';
@@ -207,18 +207,18 @@ test('selling requires the Banker: denied at the Core, allowed at OUTPOST.banker
   assert.ok(p.buyback);
 });
 
-test('sack: heals go to the sack first, a sack item can be used, sold and moved to/from the backpack, and non-consumables are rejected', () => {
+test('sack: Adrenaline Shots go to the sack first, can be used, sold and moved to/from the backpack, and non-consumables are rejected', () => {
   const room = started(new HoldoutRoom('SM', {}));
   const a = join(room, 'A'), p = a.player;
   atCore(p);
   p.money = 100000;
 
-  room.handle(p, { t: 'buy', item: 'bandage' });
-  assert.ok(p.sack.some(it => it?.id === 'bandage'), 'a bought heal goes to the sack first');
-  assert.ok(!p.inv.some(it => it?.id === 'bandage'), 'not duplicated into the backpack');
+  room.handle(p, { t: 'buy', item: 'adrenaline' });
+  assert.ok(p.sack.some(it => it?.id === 'adrenaline'), 'a bought shot goes to the sack first');
+  assert.ok(!p.inv.some(it => it?.id === 'adrenaline'), 'not duplicated into the backpack');
 
   p.hp = 50;
-  room.handle(p, { t: 'use', item: 'bandage' });
+  room.handle(p, { t: 'use', item: 'adrenaline' });
   assert.ok(p.hp > 50, 'used straight from the sack');
 
   // a gun can't be dragged into the sack
@@ -228,16 +228,16 @@ test('sack: heals go to the sack first, a sack item can be used, sold and moved 
   assert.match(a.last('deny').text, /sack/i);
 
   // a consumable bought/given goes to the sack (addItem uses the same placement rule)…
-  addItem(p, 'medkit', 1);
-  const sackIdx = p.sack.findIndex(it => it?.id === 'medkit');
+  addItem(p, 'adrenaline', 1);
+  const sackIdx = p.sack.findIndex(it => it?.id === 'adrenaline');
   assert.ok(sackIdx >= 0, 'addItem also prefers the sack for consumables');
 
   // …and can be dragged out to the backpack and back
   const backFree = p.inv.findIndex((it, i) => !it && i >= HOTBAR);
   room.handle(p, { t: 'move', from: 'k' + sackIdx, to: 'i' + backFree });
-  assert.equal(p.inv[backFree].id, 'medkit', 'moved out of the sack');
+  assert.equal(p.inv[backFree].id, 'adrenaline', 'moved out of the sack');
   room.handle(p, { t: 'move', from: 'i' + backFree, to: 'k' + sackIdx });
-  assert.equal(p.sack[sackIdx].id, 'medkit', 'moved back into the sack');
+  assert.equal(p.sack[sackIdx].id, 'adrenaline', 'moved back into the sack');
 
   // selling works from the sack too
   atBanker(p);
@@ -247,35 +247,11 @@ test('sack: heals go to the sack first, a sack item can be used, sold and moved 
   assert.ok(p.money > 100);
 });
 
-test('adrenaline: instant heal with overflow to shield, a regen/damage boost, and a cooldown', () => {
-  const room = started(new HoldoutRoom('SN', {}));
-  room.phaseEnd = Infinity; // keep it in 'prep' so update() doesn't advance into a wave
-  const a = join(room, 'A'), p = a.player;
-  atCore(p);
-  addItem(p, 'adrenaline', 2);
-  p.hp = p.maxHp - 20; // +60 heal: 20 tops off HP, 40 overflows to shield
-  p.shield = 0;
-
-  room.handle(p, { t: 'use', item: 'adrenaline' });
-  assert.equal(p.hp, p.maxHp, 'topped off to max HP');
-  assert.equal(p.shield, 40, 'the rest overflowed into shield');
-  assert.equal(countOf(p, 'adrenaline'), 1, 'consumed one');
-  assert.ok(room.dmgMultFor(p) > 1, 'damage boost active right away');
-
-  advance(room, 1000); // regen ticks, also overflowing into shield once HP is capped
-  assert.ok(p.shield > 40, 'shield kept rising from the regen');
-
-  const shBefore = p.shield;
-  room.handle(p, { t: 'use', item: 'adrenaline' }); // still on cooldown (only 1s elapsed of 2s)
-  assert.equal(p.shield, shBefore, 'no second dose yet');
-  assert.equal(countOf(p, 'adrenaline'), 1, 'not consumed again');
-});
-
 test('pickups despawn after 4 minutes (8 minutes for boss loot)', () => {
   const room = started(new HoldoutRoom('SO', {}));
   room.phaseEnd = Infinity;
-  const normal = room.inventory.spawn({ kind: 'item', id: 'bandage', n: 1 }, [0, 0, 0]);
-  const boss = room.inventory.spawn({ kind: 'item', id: 'medkit', n: 1 }, [0, 0, 0], true);
+  const normal = room.inventory.spawn({ kind: 'item', id: 'grenade', n: 1 }, [0, 0, 0]);
+  const boss = room.inventory.spawn({ kind: 'item', id: 'adrenaline', n: 1 }, [0, 0, 0], true);
   assert.ok(room.inventory.pickups.has(normal.id));
   assert.ok(room.inventory.pickups.has(boss.id));
 

@@ -9,11 +9,11 @@ import { skinFor } from './skins.js';
 const RARITY_COLORS = RARITY.map(r => r.color);
 // held non-gun items: [size], default color per kind; some items get their own color
 const ITEM_LOOK = {
-  throw: [[0.07, 0.07, 0.07], 0x4d6b35], heal: [[0.1, 0.07, 0.12], 0xd94040], shield: [[0.06, 0.1, 0.06], 0x3f8cff],
+  throw: [[0.07, 0.07, 0.07], 0x4d6b35], adrenaline: [[0.04, 0.04, 0.14], 0xff5a3c],
   trap: [[0.14, 0.04, 0.14], 0x6b7280], deploy: [[0.12, 0.1, 0.12], 0x3a3f46], armor: [[0.14, 0.12, 0.06], 0x55606b], attach: [[0.05, 0.05, 0.1], 0x2b2f35],
 };
 const ITEM_COLOR = {
-  molotov: 0xc9772e, freeze: 0x9ff2ff, bandage: 0xe9e2d0, campfire: 0xff8a3c, flame: 0xe0632d, rturret: 0x4b5a3e, shield_s: 0x7fb8ff,
+  molotov: 0xc9772e, freeze: 0x9ff2ff, campfire: 0xff8a3c, flame: 0xe0632d, rturret: 0x4b5a3e,
   gturret: 0x767b80, frturret: 0x8fd6e8, flturret: 0x8a2f1c, tesla: 0x9d8bf0, mortar: 0x3c4034,
 };
 
@@ -314,7 +314,7 @@ function buildGun(model, id) {
       box(g, 0xb04030, [0.06, 0.06, 0.12], [0, 0.02, -0.68]);
       muzzle = -0.72;
       break;
-    case 'item': { // a held grenade / medkit / trap: the shape and color follow the item (ViewModel.set)
+    case 'item': { // a held grenade / adrenaline shot / trap: the shape and color follow the item (ViewModel.set)
       const m = new THREE.Mesh(BOX, new THREE.MeshLambertMaterial({ color: 0xffffff })); // own material: recolored per item
       m.position.set(0, -0.02, -0.08);
       g.add(m);
@@ -419,7 +419,7 @@ export class ViewModel {
   }
 
   // rarity: Holdout item rarity index -> a colored accent stripe on the gun (null = none).
-  // item: the Holdout inventory item in hand (held grenades / medkits / traps take its look).
+  // item: the Holdout inventory item in hand (held grenades / adrenaline shots / traps take its look).
   set(weaponId, rarity = null, item = null) {
     const model = WEAPONS[weaponId].model;
     if (this.current) this.current.visible = false;

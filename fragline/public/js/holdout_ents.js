@@ -13,7 +13,7 @@ import { gunIconKind } from './icons.js';
 
 const G_THROW = 15, G_GLOB = 12;
 const ITEM_COLOR = {
-  grenade: 0x3f6b35, molotov: 0xe07a2e, freeze: 0x7fe9ff, bandage: 0xf2efe6, medkit: 0xe23c4a, shield_s: 0x5fb8ff, shield: 0x3d7dff, adrenaline: 0xff5a3c,
+  grenade: 0x3f6b35, molotov: 0xe07a2e, freeze: 0x7fe9ff, adrenaline: 0xff5a3c,
   spikes: 0x8c9096, darts: 0x8c9096, flame: 0xd65a2a, turret: 0x6a7480, rturret: 0x6a7480, campfire: 0xc9772e,
   gturret: 0x767b80, frturret: 0x8fd6e8, flturret: 0x8a2f1c, tesla: 0x9d8bf0, mortar: 0x3c4034,
 };

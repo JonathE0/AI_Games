@@ -53,7 +53,7 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .bindRow span { flex: 1; }
 .bindBtn { width: 104px; padding: 5px 6px; font-size: 14px; text-transform: none; letter-spacing: 0; }
 .bindBtn.listening { border-color: var(--accent); color: var(--gold); }
-.bindReset { width: 100%; margin-top: 8px; font-size: 14px; }
+.bindReset { font-size: 14px; }
 .settingsPanel small { color: var(--muted); display: block; margin-top: -4px; }
 #roomInfo { margin-bottom: 14px; color: var(--muted); }
 #roomInfo b { color: var(--fg); letter-spacing: 0.2em; font-size: 22px; }

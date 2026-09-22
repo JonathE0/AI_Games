@@ -70,32 +70,32 @@
 
 <div id="buyMenu" hidden>
   <div class="panel">
-    <header><h2>BUY</h2><span id="buyMoney"></span><span id="buyTimer"></span><span class="close">B or ESC to close</span></header>
+    <header><h2>BUY</h2><span id="buyMoney"></span><span id="buyTimer"></span><span class="close"><span id="buyKey">B</span> or ESC to close</span></header>
     <div id="buyGrid"></div>
   </div>
 </div>
 
 <div id="smithMenu" hidden>
   <div class="panel">
-    <header><h2>THE BLACKSMITH</h2><span id="smithMoney"></span><span class="close">E or ESC to close</span></header>
+    <header><h2>THE BLACKSMITH</h2><span id="smithMoney"></span><span class="close"><span id="smithKey">E</span> or ESC to close</span></header>
     <div id="smithGrid"></div>
   </div>
 </div>
 <div id="bankMenu" hidden>
   <div class="panel">
-    <header><h2>THE BANKER</h2><span id="bankMoney"></span><span class="close">E or ESC to close</span></header>
+    <header><h2>THE BANKER</h2><span id="bankMoney"></span><span class="close"><span id="bankKey">E</span> or ESC to close</span></header>
     <div id="bankGrid"></div>
   </div>
 </div>
 <div id="mapWrap" hidden>
   <div class="panel">
-    <header><h2>MAP</h2><span class="legend"><i class="lg core"></i>Core <i class="lg mate"></i>Squad <i class="lg zed"></i>Zombies <i class="lg loot"></i>Loot <i class="lg chest"></i>Chest <i class="lg drop"></i>Drop <i class="lg lane"></i>Lane</span><span class="close">Click to ping · wheel zoom · drag to pan · M or ESC to close</span></header>
+    <header><h2>MAP</h2><span class="legend"><i class="lg core"></i>Core <i class="lg mate"></i>Squad <i class="lg zed"></i>Zombies <i class="lg loot"></i>Loot <i class="lg chest"></i>Chest <i class="lg drop"></i>Drop <i class="lg lane"></i>Lane</span><span class="close">Click to ping · wheel zoom · drag to pan · <span id="mapKey">M</span> or ESC to close</span></header>
     <canvas id="bigmap"></canvas>
   </div>
 </div>
 <div id="bagMenu" hidden>
   <div class="panel">
-    <header><h2 id="bagTitle">INVENTORY</h2><span class="close">E, I or ESC to close · open it next to the team chest to share · hover a slot and press 1-6 to swap it into your hotbar</span></header>
+    <header><h2 id="bagTitle">INVENTORY</h2><span class="close"><span id="bagKey">I</span> or ESC to close · open it next to the team chest to share · hover a slot and press a hotbar key to swap it into that slot</span></header>
     <div id="bagGrid"></div>
   </div>
 </div>
@@ -121,10 +121,10 @@
     <div id="menuMsg"></div>
     <details class="controls">
       <summary>Controls</summary>
+      <p class="tag">Default right-handed keys — change them or switch to left-handed in Settings → Key bindings.</p>
       <table>
         <tr><td>WASD</td><td>Move</td></tr>
-        <tr><td>Shift</td><td>Walk (silent, accurate)</td></tr>
-        <tr><td>Ctrl / C</td><td>Crouch</td></tr>
+        <tr><td>Ctrl</td><td>Crouch</td></tr>
         <tr><td>Space</td><td>Jump</td></tr>
         <tr><td>Left click</td><td>Fire / knife slash</td></tr>
         <tr><td>Right click</td><td>Scope / knife stab</td></tr>
@@ -132,16 +132,16 @@
         <tr><td>Tab</td><td>Scoreboard</td></tr>
         <tr><td>Enter</td><td>Chat</td></tr>
         <tr><td>Esc</td><td>Pause / settings</td></tr>
-        <tr><td>1–5 · F</td><td>Gun slots · harvesting knife (F again to inspect it)</td></tr>
-        <tr><td>G</td><td>Build (1 wall · 2 floor · 3 ramp · 4 traps)</td></tr>
-        <tr><td>V</td><td>Edit a build (doors, windows, holes, half ramps)</td></tr>
-        <tr><td>LMB / RMB / X</td><td>Place / upgrade / demolish</td></tr>
-        <tr><td>E</td><td>Pick up · open · carry · revive · repair · heal Core · opens the inventory if nothing's there</td></tr>
-        <tr><td>T · H</td><td>Throw · heal/shield</td></tr>
-        <tr><td>J · 7-0</td><td>Adrenaline shot · use sack items 1-4</td></tr>
-        <tr><td>I · B · Y</td><td>Inventory (E works too) · shop (Core ring) · ready — drag an item out or shift-click it at the Banker to drop/sell it</td></tr>
+        <tr><td>1–6 · X</td><td>Hotbar slots · harvest tool (X again to inspect it) — also back from building</td></tr>
+        <tr><td>Q · F · C · Shift</td><td>Build a wall · floor · stair · cone (no build mode — Z trap · V turret · R rotate stair)</td></tr>
+        <tr><td>G</td><td>Edit a build (doors, windows, holes, half ramps)</td></tr>
+        <tr><td>LMB / RMB · X knife</td><td>Place / upgrade · break your own pieces</td></tr>
+        <tr><td>E</td><td>Pick up · open · carry · revive · repair · heal Core</td></tr>
+        <tr><td>T · N</td><td>Throw · next throwable</td></tr>
+        <tr><td>H · 7-0</td><td>Adrenaline shot · use sack items 1-4</td></tr>
+        <tr><td>I · B · Y</td><td>Inventory · shop (Core ring) · ready — drag an item out or shift-click it at the Banker to drop/sell it</td></tr>
       </table>
-      <p>Hold jump to bunny hop — strafe (A/D) while turning to build speed. Every key can be rebound in Settings → Key bindings.</p>
+      <p>Hold jump to bunny hop — strafe (A/D) while turning to build speed. Every key can be rebound in Settings → Key bindings, which also has right- and left-handed presets.</p>
     </details>
   </div>
   <div class="menuPanel settingsPanel" id="settings"></div>

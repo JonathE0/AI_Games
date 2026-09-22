@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { makeGun, addItem, countOf } from '../server/holdout/inventory.js';
 import { HoldoutRoom, HOLDOUT } from '../server/holdout/room.js';
 import { GRID, pieceBoxes, validMask, doorOf } from '../shared/build.js';
-import { AMMO, ITEMS, intermissionFor, MONEY_CAP } from '../shared/holdout.js';
+import { AMMO, intermissionFor, MONEY_CAP } from '../shared/holdout.js';
 import { SKY, skyPoint } from '../shared/skyboss.js';
 import { OUTPOST, OUTPOST_SHELTERS } from '../shared/outpost.js';
 import { WEAPONS } from '../shared/weapons.js';
@@ -51,8 +51,8 @@ test('server edits: zombies walk through openings but must break doors', () => {
   const cellCost = () => { room.flow.update(room.aliveNodeBoxes(), [...room.pieces.values()]); return room.flow.cost[room.flow.idx(-3.5, -7.5)]; };
   assert.ok(cellCost() > 0);
   T += 1000;
-  room.handle(a.player, { t: 'edit', id: s.id, mask: 1 | 8 | 64 }); // whole left column gone: an open slot, not a door
-  assert.equal(a.last('sedit').mask, 73);
+  room.handle(a.player, { t: 'edit', id: s.id, mask: 1 | 2 | 8 | 16 }); // left half arch: an open 2 × 2, not a door
+  assert.equal(a.last('sedit').mask, 27);
   assert.equal(cellCost(), 0);
   T += 1000;
   room.handle(a.player, { t: 'edit', id: s.id, mask: 1 | 8 }); // left door
@@ -87,7 +87,7 @@ test('backpack: five gun slots, typed ammo bought at the Core, reloads draw from
   assert.equal(p.inv[0].id, 'smg');
   assert.ok([...room.inventory.pickups.values()].some(pk => pk.item?.id === 'pistol'));
   p.st.p = [30, 0, 30];
-  room.handle(p, { t: 'buy', item: 'bandage' });
+  room.handle(p, { t: 'buy', item: 'adrenaline' });
   assert.match(a.last('deny').text, /ring around the Core/);
 });
 
@@ -305,5 +305,4 @@ test('holdout guns: Fortnite-style roster with double magazines, snipers kept', 
   assert.equal(WEAPONS.smg.mag, 60);
   assert.equal(WEAPONS.h_ssg.mag, WEAPONS.ssg08.mag * 2);
   assert.equal(WEAPONS.h_awp.dmg, WEAPONS.awp.dmg);
-  assert.equal(ITEMS.medkit.cap, 100);
 });

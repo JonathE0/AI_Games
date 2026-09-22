@@ -80,9 +80,9 @@ test('mid-wave joins add zombies to what is left; leaving trims it', () => {
   assert.ok(room.director.remaining < grown);
 });
 
-test('building costs materials, grows, repairs, refuses upgrades and can be demolished by its owner', () => {
+test('building costs materials, grows, repairs and refuses upgrades', () => {
   const room = new HoldoutRoom('ZOMB', { rng });
-  const a = join(room, 'A'), b = join(room, 'B');
+  const a = join(room, 'A');
   a.player.st.p = [0, 0, -6];
   room.handle(a.player, { t: 'build', kind: 'wall', ...tile(-4, -8), l: 0, o: 0, mat: 'zink' });
   assert.equal(builds(room), 0, 'no building in the lobby');
@@ -105,11 +105,6 @@ test('building costs materials, grows, repairs, refuses upgrades and can be demo
   T += 1000;
   room.handle(a.player, { t: 'repair', id: s.id });
   assert.equal(Math.round(s.hp), 690);
-  b.player.st.p = [0, 0, -6];
-  room.handle(b.player, { t: 'demolish', id: s.id });
-  assert.equal(b.last('deny').text, 'Only the builder can remove this');
-  room.handle(a.player, { t: 'demolish', id: s.id });
-  assert.equal(builds(room), 0);
 });
 
 test('harvesting needs the knife and depletes nodes', () => {

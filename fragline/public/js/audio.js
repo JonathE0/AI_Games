@@ -204,7 +204,6 @@ const DEFS = {
     for (let i = 0; i < 6; i++) noise(c, o, { t: i * 0.045 + Math.random() * 0.02, dur: 0.035, gain: 0.3, type: 'highpass', freq: 5000 + i * 700, seed: 190 + i });
   }],
   pop: [0.3, (c, o) => { noise(c, o, { dur: 0.08, gain: 1, type: 'bandpass', freq: 1200, q: 1, seed: 136 }); tone(c, o, { dur: 0.1, gain: 0.4, freq: 600, freqEnd: 200 }); }],
-  heal_done: [0.6, (c, o) => [660, 880, 1320].forEach((f, i) => tone(c, o, { t: i * 0.07, dur: 0.3, gain: 0.18, freq: f, type: 'triangle' }))],
   throw: [0.3, (c, o) => noise(c, o, { dur: 0.22, gain: 0.6, type: 'bandpass', freq: 400, freqEnd: 1600, q: 1.2, attack: 0.04, seed: 137 })],
   pickup: [0.3, (c, o) => { tone(c, o, { dur: 0.08, gain: 0.25, freq: 900, freqEnd: 1300, type: 'triangle' }); tone(c, o, { t: 0.07, dur: 0.12, gain: 0.2, freq: 1760 }); }],
   sky_roar: [2.6, (c, o) => { tone(c, o, { dur: 2.3, gain: 0.7, freq: 52, freqEnd: 38, type: 'sawtooth', attack: 0.3 }); tone(c, o, { dur: 2.2, gain: 0.45, freq: 78, freqEnd: 60, type: 'sawtooth', attack: 0.35 }); noise(c, o, { dur: 2.3, gain: 0.8, type: 'bandpass', freq: 380, freqEnd: 160, q: 1.2, attack: 0.3, seed: 138 }); }],

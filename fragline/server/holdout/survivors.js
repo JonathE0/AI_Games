@@ -38,7 +38,7 @@ export class Survivors {
     return sv;
   }
 
-  // Bandages / medkits used on them, the Medic's aura, campfires: survivors never heal on their own.
+  // The Medic's aura, Medic survivors and Rally Fires (on top of their very slow passive regen in think).
   heal(sv, amount) {
     if (!sv.alive || sv.hp >= sv.maxHp) return 0;
     const add = Math.min(sv.maxHp - sv.hp, amount);
@@ -103,7 +103,7 @@ export class Survivors {
     const room = this.room, c = room.map.core, R = room.map.buyRadius - 1, bias = SURVIVOR_CLASSES[sv.cls]?.postBias || 0;
     const spots = [];
     for (const s of room.pieces.values()) {
-      if (s.kind === 'wall' || s.kind === 'prop') continue;
+      if (s.kind === 'wall' || s.kind === 'cone' || s.kind === 'prop') continue; // no perching on a cone's tip
       const b = s.box, x = (b.min[0] + b.max[0]) / 2, z = (b.min[2] + b.max[2]) / 2, d = Math.hypot(x - c.x, z - c.z);
       if (d <= R && b.max[1] > 0.4) spots.push([x, z, d]);
     }

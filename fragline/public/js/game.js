@@ -5,7 +5,7 @@ import { WEAPONS } from '/shared/weapons.js';
 import { rayWorld, dirFromAngles, eyeHeight } from '/shared/physics.js';
 import { World } from './world.js';
 import { Sound } from './audio.js';
-import { Hud, BUILD_ACTIONS } from './hud.js';
+import { Hud } from './hud.js';
 import { Input } from './input.js';
 import { Net, SOLO } from './net.js';
 import { LocalPlayer } from './player.js';
@@ -58,8 +58,8 @@ export class Game {
     this.world.setFov(s.fov, this.world.zoom);
     this.world.setQuality({ renderScale: s.renderScale, shadows: s.shadows });
     this.codeMap = {}; // key/button code -> action
-    this.buildMap = {}; // same while Holdout build mode is on (those keys may double up with combat keys)
-    for (const [act, codes] of Object.entries(s.binds)) for (const c of codes) if (c) (BUILD_ACTIONS.has(act) ? this.buildMap : this.codeMap)[c] = act;
+    this.buildMap = {}; // wins while building in Holdout: only Rotate, which may share a key (R with Reload)
+    for (const [act, codes] of Object.entries(s.binds)) for (const c of codes) if (c) (act === 'bRotate' ? this.buildMap : this.codeMap)[c] = act;
     if (this.input) this.input.captured = new Set([...Object.keys(this.codeMap), ...Object.keys(this.buildMap)]);
     if (this.inGame) { if (s.fullscreen) this.enterFullscreen(); else this.exitFullscreen(); }
   }
@@ -253,6 +253,7 @@ export class Game {
     if (!this.holdout.canBuy()) { this.hintMsg = 'The shop is at the Core'; this.hintUntil = this.now + 2; return; }
     this.ui = 'buy';
     $('buyMenu').hidden = false;
+    $('buyKey').textContent = this.holdout.key('buy');
     this.renderBuy();
     if (this.input.locked) this.setVCursor(innerWidth / 2, innerHeight / 2);
   }
@@ -441,7 +442,7 @@ export class Game {
       return;
     }
     if (this.ui === 'bag') {
-      if (act === 'backpack' || act === 'interact') this.holdout.closeBag();
+      if (act === 'backpack' || (act === 'interact' && this.holdout.bagAtChest)) this.holdout.closeBag();
       else if (act === 'flashlight') this.holdout.invUI.toggleLock(this.vcur);
       else if (code === 'Mouse0' && this.vcur) this.holdout.invUI.down(...this.vcur, this.input.down('ShiftLeft') || this.input.down('ShiftRight'));
       else if (code === 'WheelUp' || code === 'WheelDown') this.vScroll(code);
@@ -509,7 +510,7 @@ export class Game {
     const downed = !!this.holdout?.downed; // Holdout: knocked down players crawl
     const input = {
       f: mkey('forward'), b: mkey('back'), l: mkey('left'), r: mkey('right'),
-      walk: mkey('walk'), crouch: downed ? 1 : mkey('crouch'), jump: 0,
+      crouch: downed ? 1 : mkey('crouch'), jump: 0,
     };
     const holdJump = bhop && key('jump') && !downed; // bhop mode: holding jump re-jumps the instant you land
     const maxSp = downed ? 9 : this.weapons.speedLimit() * (this.holdout?.carrying ? 0.75 : 1) * (this.holdout?.speedMult ?? 1); // downed: a faster crawl
@@ -561,7 +562,7 @@ export class Game {
       inspect: this.weapons.inspectProgress(),
     });
     this.showVM = pl.alive && this.hud.settings.viewmodel && !this.weapons.scope && !this.intro && !building && !downed &&
-      !this.holdout?.edit.active && !this.holdout?.using && !this.holdout?.carrying;
+      !this.holdout?.edit.active && !this.holdout?.carrying;
 
     this.sendAcc += dt;
     if (this.sendAcc >= 1 / 32 && pl.alive) {

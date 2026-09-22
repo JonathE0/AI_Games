@@ -2,7 +2,7 @@
 // typed ammo and building materials as plain counters, the shop at the Core, the team chest (a shared
 // 18-slot grid plus pooled money / materials / ammo), ground pickups and loot spilling. Server-authoritative.
 import { WEAPONS } from '../../shared/weapons.js';
-import { AMMO, AMMO_IDS, ITEMS, POWERUPS, MAT_CAP, MONEY_CAP, SHOP_RARITY, START_AMMO, shopEntry, ammoCap, elementPrice, RARITY, rarityCost, sellPrice, itemValue, TEAM_UPS } from '../../shared/holdout.js';
+import { AMMO, AMMO_IDS, ITEMS, POWERUPS, MAT_CAP, MONEY_CAP, SHOP_RARITY, START_AMMO, shopEntry, ammoCap, elementPrice, RARITY, rarityCost, sellPrice, itemValue, TEAM_UPS, ADREN_CARRY } from '../../shared/holdout.js';
 import { ELEMENTS } from '../../shared/elements.js';
 import { INV_SIZE, HOTBAR, STASH_SIZE, SACK_SIZE, ARMOR, ARMOR_SLOTS, ATTACH, stackMax, magFor, kindOf, placeItem, countIn, tierCost, itemName, isConsumable, fits } from '../../shared/items.js';
 import { MAT_IDS } from '../../shared/build.js';
@@ -154,6 +154,17 @@ export class Inventory {
     const room = this.room;
     if (pk.kind === 'it') {
       const it = pk.item, before = it.n;
+      if (it.kind === 'adrenaline') {
+        const cap = Math.max(0, ADREN_CARRY - countOf(p, it.id));
+        if (!cap) { room.send(p, { t: 'deny', text: `You can carry ${ADREN_CARRY} Adrenaline Shots` }); return false; }
+        if (it.n > cap) {
+          const got = cap - (giveItem(p, { ...it, uid: nextUid(), n: cap })?.n ?? 0);
+          if (got > 0) room.send(p, { t: 'got', it: { ...it, n: got } });
+          room.send(p, { t: 'deny', text: `You can carry ${ADREN_CARRY} Adrenaline Shots` });
+          it.n = before - got;
+          return false;
+        }
+      }
       const left = giveItem(p, it);
       if (!left) { room.send(p, { t: 'got', it }); return true; }
       if (it.kind === 'gun' || stackMax(it) === 1) {
@@ -252,7 +263,7 @@ export class Inventory {
     // Colossus-wave chest snipers: one per player per wave (see giveChestSnipers) — normal chest rules otherwise
     const takingChestSniper = a.box === 's' && b.box !== 's' && src.kind === 'gun' && src.chestGift;
     if (takingChestSniper && room.chestSniperTaken?.has(p.id)) return deny('You already grabbed a sniper from the chest this wave');
-    if (b.box === 'k' && !isConsumable(src)) return deny('The sack only holds heals, shields and adrenaline');
+    if (b.box === 'k' && !isConsumable(src)) return deny('The sack only holds Adrenaline Shots');
     // an attachment dropped on a gun gets fitted (whatever was in that slot comes back) — an upgrade, so a lock on either side doesn't block it
     if (src.kind === 'attach' && dst?.kind === 'gun' && b.box !== 'a') {
       const slot = ATTACH[src.id].slot, old = dst.att?.[slot];
@@ -263,10 +274,22 @@ export class Inventory {
       room.send(p, { t: 'msg', text: `${ATTACH[src.id].name} fitted` });
       return this.changed(p, a, b);
     }
-    if (src.locked || dst?.locked) return deny('Locked — press L to unlock');
+    if (src.locked || dst?.locked) return deny('Locked — press your lock key to unlock');
     // armor only goes into its own slot
     if (b.box === 'a' && (src.kind !== 'armor' || ARMOR[src.id].slot !== b.key)) return deny('That goes in another slot');
     if (a.box === 'a' && dst && (dst.kind !== 'armor' || ARMOR[dst.id].slot !== a.key)) return deny('That goes in another slot');
+    // pulling Adrenaline Shots out of the team chest still respects the carry cap — move only up to it
+    if (src.kind === 'adrenaline' && a.box === 's' && b.box !== 's') {
+      const cap = ADREN_CARRY - countOf(p, src.id);
+      if (cap <= 0) return deny(`You can carry ${ADREN_CARRY} Adrenaline Shots`);
+      if (src.n > cap) {
+        if (dst && dst.id !== src.id) return deny(`You can carry ${ADREN_CARRY} Adrenaline Shots`);
+        if (dst) dst.n += cap; else this.set(p, b, { ...src, uid: nextUid(), n: cap });
+        src.n -= cap;
+        room.send(p, { t: 'deny', text: `You can carry ${ADREN_CARRY} Adrenaline Shots` });
+        return this.changed(p, a, b);
+      }
+    }
     // merge stacks of the same thing
     if (dst && dst.id === src.id && dst.kind === src.kind && stackMax(dst) > 1) {
       const k = Math.min(stackMax(dst) - dst.n, src.n);
@@ -289,7 +312,7 @@ export class Inventory {
     if (!r || r.box === 's' || !p.alive || p.downed) return;
     const it = this.get(p, r);
     if (!it) return;
-    if (it.locked) return this.room.send(p, { t: 'deny', text: 'Locked — press L to unlock' });
+    if (it.locked) return this.room.send(p, { t: 'deny', text: 'Locked — press your lock key to unlock' });
     const n = Math.max(1, Math.min(it.n ?? 1, m.n | 0 || it.n || 1));
     let out = it;
     if ((it.n ?? 1) > n) { it.n -= n; out = { ...it, uid: nextUid(), n }; }
@@ -347,7 +370,8 @@ export class Inventory {
     } else if (e.kind === 'ammo') {
       if (!addAmmo(p, e.type, AMMO[e.type].pack)) return deny('That ammo is full');
     } else if (e.kind === 'item') {
-      if (countOf(p, id) >= ITEMS[id].max * 2) return deny(`You can carry ${ITEMS[id].max * 2}`);
+      const cap = id === 'adrenaline' ? ADREN_CARRY : ITEMS[id].max * 2;
+      if (countOf(p, id) >= cap) return deny(id === 'adrenaline' ? `You can carry ${ADREN_CARRY} Adrenaline Shots` : `You can carry ${cap}`);
       if (giveItem(p, makeItem(id, 1))) return deny('Inventory full');
     } else if (e.kind === 'armor') {
       const a = makeArmor(id, 1), where = ARMOR[id].slot;
@@ -414,7 +438,7 @@ export class Inventory {
     if (idx < 0 && p.sack) { idx = p.sack.findIndex(x => x?.uid === m.uid); from = p.sack; }
     if (idx < 0) return;
     const it = from[idx], price = sellPrice(it);
-    if (it.locked) return deny('Locked — press L to unlock');
+    if (it.locked) return deny('Locked — press your lock key to unlock');
     from[idx] = null;
     p.money = Math.min(MONEY_CAP, p.money + price);
     p.buyback = { item: it, price }; // only the last sale is kept

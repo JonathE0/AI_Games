@@ -1,9 +1,9 @@
 // Zombie Holdout building on the client: draws built pieces (instanced, or a custom mesh once edited),
-// doors that swing open for players and survivors, harvest nodes, and runs build mode (ghost preview,
+// doors that swing open for players and survivors, harvest nodes, and runs building (ghost preview,
 // grid snapping, turbo building, trap placement) and edit mode (Fortnite-style tile editing).
 // The server re-checks everything with the same shared rules (shared/build.js).
 import * as THREE from 'three';
-import { GRID, BMATS, MAT_IDS, KINDS, PIECE_COST, REACH, EDIT_GRID, RAMP_THICK, FLOOR_LIFT, pieceBox, pieceBoxes, slotKey, aimBuildSlot, validMask, doorOf, distToBox } from '/shared/build.js';
+import { GRID, BMATS, MAT_IDS, KINDS, PIECE_COST, REACH, EDIT_GRID, RAMP_THICK, FLOOR_LIFT, CONE_H, pieceBox, pieceBoxes, slotKey, aimBuildSlot, validMask, doorOf, distToBox, wallLoops, rampEdit, WALL_EDITS } from '/shared/build.js';
 import { OUTPOST_NODES, NODE_TYPES } from '/shared/outpost.js';
 import { ITEMS, TRAPS, DEPLOYS } from '/shared/holdout.js';
 import { rayWorld, dirFromAngles } from '/shared/physics.js';
@@ -23,7 +23,39 @@ function pieceGeometry(kind) {
   let g;
   if (kind === 'wall') g = new THREE.BoxGeometry(C, H, T);
   else if (kind === 'floor') g = new THREE.BoxGeometry(C, T, C);
+  else if (kind === 'cone') g = coneGeometry();
   else g = rampGeometry({ min: [-C / 2, 0, -C / 2], max: [C / 2, H, C / 2], ramp: { axis: 0, dir: 1, slope: H / C, thick: RAMP_THICK } });
+  worldUV(g, 1.2);
+  return g;
+}
+
+// Square pyramid over a tile (centered, base at y = 0) with a flat underside, only over the quarters a cone edit
+// left (bit = row * 2 + col, like floors); the cut through the middle is closed where a neighbour quarter is gone.
+function coneGeometry(mask = 0) {
+  const h = C / 2, A = [0, CONE_H, 0], O = [0, 0, 0], pos = [];
+  const tri = (a, b, c, out) => { // wound so the face looks toward `out`
+    const u = b.map((v, i) => v - a[i]), w = c.map((v, i) => v - a[i]);
+    const n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+    pos.push(...a, ...(n[0] * out[0] + n[1] * out[1] + n[2] * out[2] < 0 ? [...c, ...b] : [...b, ...c]));
+  };
+  for (let q = 0; q < 4; q++) {
+    if (mask & (1 << q)) continue;
+    const sx = q & 1 ? 1 : -1, sz = q & 2 ? 1 : -1, K = [sx * h, 0, sz * h], X = [0, 0, sz * h], Z = [sx * h, 0, 0];
+    tri(K, X, A, [0, 1, sz]); tri(K, Z, A, [sx, 1, 0]);
+    tri(K, X, O, [0, -1, 0]); tri(K, O, Z, [0, -1, 0]);
+    if (mask & (1 << (q ^ 1))) tri(X, O, A, [-sx, 0, 0]);
+    if (mask & (1 << (q ^ 2))) tri(Z, O, A, [0, 0, -sz]);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array((pos.length / 3) * 2), 2));
+  g.computeVertexNormals();
+  return g;
+}
+
+// An edited cone in world space with world UVs (like editedGeometry): the facets over its remaining quarters.
+function editedCone(p) {
+  const b = p.box, g = coneGeometry(p.mask).translate((b.min[0] + b.max[0]) / 2, b.min[1], (b.min[2] + b.max[2]) / 2);
   worldUV(g, 1.2);
   return g;
 }
@@ -50,6 +82,22 @@ function editedGeometry(boxes) {
   return m;
 }
 
+// An edited wall: one slab extruded from its outline (shared/build.js wallLoops), so arches and triangles are smooth.
+function wallGeometry(p) {
+  const shapes = [], holes = [];
+  for (const loop of wallLoops(p.mask)) {
+    const pts = loop.map(([u, v]) => new THREE.Vector2((u * C) / 3, (v * H) / 3));
+    if (THREE.ShapeUtils.isClockWise(pts)) holes.push(new THREE.Path(pts));
+    else shapes.push(new THREE.Shape(pts));
+  }
+  if (shapes.length) shapes[0].holes = holes; // only the middle window is a hole, and that wall has one outline
+  const b = p.box, g = new THREE.ExtrudeGeometry(shapes, { depth: T, bevelEnabled: false }).translate(0, 0, -T / 2);
+  if (p.o === 1) g.rotateY(-Math.PI / 2); // along the wall -> +z
+  g.translate(p.o === 0 ? b.min[0] : (b.min[0] + b.max[0]) / 2, b.min[1], p.o === 0 ? (b.min[2] + b.max[2]) / 2 : b.min[2]);
+  worldUV(g, 1.2);
+  return g;
+}
+
 // Instance transform for a piece (geometry above is centered on its tile edge / tile).
 export function pieceTransform(p, out) {
   const x0 = GRID.x0 + p.i * C, z0 = GRID.z0 + p.k * C, y0 = p.l * H;
@@ -58,6 +106,7 @@ export function pieceTransform(p, out) {
     if (p.o === 0) _v.set(x0 + C / 2, y0 + H / 2, z0);
     else { _v.set(x0, y0 + H / 2, z0 + C / 2); yaw = Math.PI / 2; }
   } else if (p.kind === 'floor') _v.set(x0 + C / 2, y0 - T / 2 + FLOOR_LIFT, z0 + C / 2);
+  else if (p.kind === 'cone') _v.set(x0 + C / 2, y0 + FLOOR_LIFT, z0 + C / 2);
   else { _v.set(x0 + C / 2, y0, z0 + C / 2); yaw = RAMP_YAW[p.o]; }
   return out.compose(_v, _q.setFromAxisAngle(Y_AXIS, yaw), _s.set(1, 1, 1));
 }
@@ -112,10 +161,11 @@ export class Structures {
     return { p, prevHp };
   }
 
-  edit(id, mask) {
+  edit(id, mask, o) {
     const p = this.list.get(id);
     if (!p) return null;
     p.mask = mask;
+    if (o !== undefined && p.o !== o) { p.o = o; p.box = pieceBox(p); } // a stair turned by a drag edit
     p.boxes = pieceBoxes(p);
     this.rebuildEdited(p);
     this.dirty = true;
@@ -128,7 +178,7 @@ export class Structures {
     this.disposeEdited(p);
     if (!p.mask) return;
     const mat = new THREE.MeshLambertMaterial({ map: this.textures[p.mat], color: matColor(BMATS[p.mat].code) });
-    p.mesh = new THREE.Mesh(editedGeometry(p.boxes), mat);
+    p.mesh = new THREE.Mesh(p.kind === 'cone' ? editedCone(p) : p.kind === 'wall' ? wallGeometry(p) : editedGeometry(p.boxes), mat);
     p.mesh.castShadow = p.mesh.receiveShadow = true;
     this.scene.add(p.mesh);
     const d = p.kind === 'wall' && doorOf(p.mask);
@@ -336,13 +386,13 @@ export class Nodes {
   }
 }
 
-// ---------- build mode ----------
+// ---------- building (no build mode: a piece key starts it, a hotbar key ends it) ----------
 export class BuildMode {
   constructor(game, holdout) {
     this.g = game;
     this.h = holdout;
     this.active = false;
-    this.kind = 'wall';     // wall | floor | ramp | trap | deploy
+    this.kind = 'wall';     // wall | floor | ramp | cone | trap | deploy
     this.mat = MAT_IDS[0];  // one material — Zinkonium
     this.pick = { trap: null, deploy: null }; // selected trap / deployable item id
     this.turn = 0;          // extra quarter turns for the next stair (R); resets after placing
@@ -417,6 +467,7 @@ export class BuildMode {
     const p = eye.map((v, j) => v + dir[j] * hit.t);
     const taken = (pid, side) => [...this.h.ents.defs.values()].some(d => d.pid === pid && d.side === side);
     if (it.mount === 'floor') {
+      if (piece?.kind === 'cone') return { reason: 'A cone is in the way' };
       if (!piece || piece.kind !== 'floor' || hit.n[1] < 0.5) return { reason: 'Floor traps go on a built floor' };
       if (taken(piece.id, 0)) return { reason: 'Already trapped' };
       const b = piece.box;
@@ -437,7 +488,7 @@ export class BuildMode {
     return { i, k, pid: floor?.id ?? 0, box: { min: [x - 0.6, y, z - 0.6], max: [x + 0.6, y + 1.2, z + 0.6] } };
   }
 
-  // The built piece under the crosshair within reach (for upgrade / repair / demolish / edit).
+  // The built piece under the crosshair within reach (for upgrade / repair / edit).
   aimedPiece() {
     const pl = this.g.player, eye = pl.eye, dir = dirFromAngles(pl.yaw, pl.pitch);
     const hit = rayWorld(eye, dir, REACH, this.g.boxes);
@@ -504,9 +555,10 @@ export class BuildMode {
 }
 
 // ---------- edit mode ----------
-// Aim at a piece and press the edit key: a tile grid appears on it. Click (or drag) tiles to cut them out,
-// press edit again to confirm, right-click to reset the piece. Doors appear when you cut the bottom two
-// tiles of a column; windows, arches and half walls are just other tile patterns.
+// Aim at a piece and press the edit key: a tile grid appears on it. Hold fire and drag over tiles; letting go
+// applies the edit when it's one of Fortnite's shapes (walls: windows, doors, arches, half arches, triangles,
+// half walls — shared/build.js WALL_EDITS; floors: any 1-3 quarters) and flashes red otherwise. Stairs: drag
+// across all four tiles to turn them, over two side by side for a half stair. Right-click resets the piece.
 export class EditMode {
   constructor(game, holdout) {
     this.g = game;
@@ -514,6 +566,9 @@ export class EditMode {
     this.active = false;
     this.piece = null;
     this.mask = 0;
+    this.path = [];         // stairs: tiles in drag order
+    this.flash = 0;         // tiles of a rejected edit, shown red until flashUntil
+    this.flashUntil = 0;
     this.paint = null;
     this.wasFiring = false;
     this.group = new THREE.Group();
@@ -521,6 +576,7 @@ export class EditMode {
     this.keep = new THREE.MeshBasicMaterial({ color: 0x4dc3ff, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide });
     this.cut = new THREE.MeshBasicMaterial({ color: 0xff5a4e, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide });
     this.hot = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, depthWrite: false, side: THREE.DoubleSide });
+    this.bad = new THREE.MeshBasicMaterial({ color: 0xff2a1e, transparent: true, opacity: 0.6, depthWrite: false, side: THREE.DoubleSide });
     this.ray = new THREE.Raycaster();
     this.hover = -1;
   }
@@ -535,6 +591,7 @@ export class EditMode {
   begin(p) {
     this.piece = p;
     this.mask = p.mask | 0;
+    this.path = [];
     this.active = true;
     this.paint = null;
     this.wasFiring = false;
@@ -545,7 +602,7 @@ export class EditMode {
   buildTiles() {
     for (const c of [...this.group.children]) { this.group.remove(c); c.geometry.dispose(); }
     const p = this.piece, [cols, rows] = EDIT_GRID[p.kind], b = p.box, eye = this.g.player.eye;
-    const cx = (b.min[0] + b.max[0]) / 2, cy = (b.min[1] + b.max[1]) / 2, cz = (b.min[2] + b.max[2]) / 2;
+    const cx = (b.min[0] + b.max[0]) / 2, cz = (b.min[2] + b.max[2]) / 2;
     if (p.kind === 'wall') {
       const ax = p.o === 0 ? 0 : 2, nAx = p.o === 0 ? 2 : 0, side = eye[nAx] > (nAx === 0 ? cx : cz) ? 1 : -1, w = C / 3, h = H / 3;
       for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
@@ -566,51 +623,88 @@ export class EditMode {
         m.userData.bit = r * 2 + c;
         this.group.add(m);
       }
-    } else {
-      const ramp = pieceBox(p).ramp, perp = ramp.axis === 0 ? 2 : 0, len = Math.hypot(C, H);
-      for (let c = 0; c < 2; c++) {
-        const m = new THREE.Mesh(new THREE.PlaneGeometry(len - 0.1, C / 2 - 0.08), this.keep);
-        const pos = [cx, cy + 0.06, cz];
-        pos[perp] = b.min[perp] + (c + 0.5) * C / 2;
-        m.position.set(...pos);
-        // lay the plane flat, tilt it up the slope (+x rises), then turn it to the ramp's direction
-        const flat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
-        const tilt = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.atan2(H, C));
-        m.quaternion.setFromAxisAngle(Y_AXIS, RAMP_YAW[p.o]).multiply(tilt).multiply(flat);
-        m.userData.bit = c;
+    } else if (p.kind === 'cone') { // each quarter's slice of the pyramid, a little outside it
+      for (let bit = 0; bit < 4; bit++) {
+        const m = new THREE.Mesh(coneGeometry(15 & ~(1 << bit)), this.keep);
+        m.position.set(cx, b.min[1] - 0.03, cz);
+        m.scale.set(1.03, 1.06, 1.03);
+        m.userData.bit = bit;
         this.group.add(m);
       }
+    } else { // stairs: 2 × 2 tiles on the slope (bit = row * 2 + col, col along x), whatever half is left
+      const { axis, dir, slope } = b.ramp, len = Math.hypot(C, H) / 2;
+      // lay the plane flat, tilt it up the slope (+x rises), then turn it to the ramp's direction
+      const flat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+      const tilt = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.atan2(H, C));
+      const q = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, RAMP_YAW[p.o]).multiply(tilt).multiply(flat);
+      for (let r = 0; r < 2; r++) for (let c = 0; c < 2; c++) {
+        const m = new THREE.Mesh(new THREE.PlaneGeometry(len - 0.1, C / 2 - 0.08), this.keep);
+        const pos = [b.min[0] + (c + 0.5) * C / 2, 0, b.min[2] + (r + 0.5) * C / 2];
+        pos[1] = b.min[1] + (dir > 0 ? pos[axis] - b.min[axis] : b.max[axis] - pos[axis]) * slope + 0.06;
+        m.position.set(...pos);
+        m.quaternion.copy(q);
+        m.userData.bit = r * 2 + c;
+        this.group.add(m);
+      }
+      this.tilesO = p.o;
     }
     this.group.visible = true;
   }
 
-  // firing = fire button held: the first tile clicked decides whether the drag cuts or restores. Letting
-  // go applies whatever was dragged out right away — no second V press needed to send it.
+  // firing = fire button held: on walls and floors the first tile clicked decides whether the drag cuts or
+  // restores; on stairs the tiles are kept in drag order. Letting go applies it right away — no second key press.
   update(dt, firing) {
     if (!this.active) return;
     const p = this.piece, pl = this.g.player;
     if (!this.h.structs.list.has(p.id) || !pl.alive || this.h.downed || distToBox(pl.eye, p.box) > REACH + 1.5) return this.stop();
+    if (p.kind === 'ramp' && this.tilesO !== p.o) this.buildTiles(); // the last edit turned it
     const dir = dirFromAngles(pl.yaw, pl.pitch);
     this.ray.set(new THREE.Vector3(...pl.eye), new THREE.Vector3(...dir));
     const hit = this.ray.intersectObjects(this.group.children, false)[0];
     this.hover = hit ? hit.object.userData.bit : -1;
     if (firing && this.hover >= 0) {
-      const bit = 1 << this.hover;
-      if (this.paint === null) this.paint = !(this.mask & bit);
-      const next = this.paint ? this.mask | bit : this.mask & ~bit;
-      if (next !== this.mask && validMask(p.kind, next)) { this.mask = next; this.g.sound.play('tick', { vol: 0.25, rate: 1.4 }); }
+      const bit = 1 << this.hover, was = this.mask, steps = this.path.length;
+      if (p.kind === 'ramp') { if (!this.path.includes(this.hover)) this.path.push(this.hover); }
+      else {
+        if (this.paint === null) this.paint = !(this.mask & bit);
+        this.mask = this.paint ? this.mask | bit : this.mask & ~bit;
+      }
+      if (this.mask !== was || this.path.length !== steps) this.g.sound.play('tick', { vol: 0.25, rate: 1.4 });
     } else if (!firing) {
       if (this.wasFiring) this.commit();
       this.paint = null;
     }
     this.wasFiring = firing;
-    for (const m of this.group.children) m.material = m.userData.bit === this.hover ? this.hot : this.mask & (1 << m.userData.bit) ? this.cut : this.keep;
+    const sel = p.kind === 'ramp' ? this.path.reduce((m, t) => m | (1 << t), 0) : this.mask, bad = this.g.now < this.flashUntil ? this.flash : 0;
+    for (const m of this.group.children) {
+      const bit = 1 << m.userData.bit;
+      m.material = bad & bit ? this.bad : m.userData.bit === this.hover ? this.hot : sel & bit ? this.cut : this.keep;
+    }
   }
 
-  // Sends the current mask if it differs from the piece's last confirmed one — safe to call often (the
-  // server no-ops a resend of the same mask), so releasing the mouse and pressing V to leave both use it.
+  // Sends the selection when it's a valid edit that changes the piece — safe to call often, so releasing the
+  // mouse and pressing the edit key to leave both use it. Anything else flashes red and resets; nothing is sent.
   commit() {
-    if (this.piece && this.mask !== (this.piece.mask | 0)) this.g.net.send({ t: 'edit', id: this.piece.id, mask: this.mask });
+    const p = this.piece;
+    if (!p) return;
+    if (p.kind === 'ramp') {
+      const path = this.path, e = rampEdit(path);
+      this.path = [];
+      if (!path.length) return;
+      if (!e) return this.invalid(path.reduce((m, t) => m | (1 << t), 0));
+      if (e.o !== p.o || e.mask !== (p.mask | 0)) this.g.net.send({ t: 'edit', id: p.id, path });
+    } else if (this.mask !== (p.mask | 0)) {
+      if (validMask(p.kind, this.mask)) this.g.net.send({ t: 'edit', id: p.id, mask: this.mask });
+      else this.invalid(this.mask);
+    }
+  }
+
+  invalid(tiles) {
+    this.flash = tiles;
+    this.flashUntil = this.g.now + 0.45;
+    this.mask = this.piece.mask | 0;
+    this.h.say('Not a valid edit', 1.5);
+    this.g.sound.play('dry', { vol: 0.4 });
   }
 
   confirm() {
@@ -630,14 +724,20 @@ export class EditMode {
   }
 
   describe() {
-    if (!this.piece) return '';
-    const d = this.piece.kind === 'wall' && doorOf(this.mask);
-    return d ? (d.w === 2 ? 'double door' : 'door') : this.mask ? 'custom' : 'solid';
+    const p = this.piece;
+    if (!p) return '';
+    if (p.kind === 'ramp') {
+      if (!this.path.length) return p.mask ? 'half stair' : 'stair';
+      const e = rampEdit(this.path);
+      return e ? (e.mask ? 'half stair' : 'turn') : 'drag across';
+    }
+    if (!this.mask) return 'solid';
+    return p.kind === 'wall' ? WALL_EDITS.get(this.mask)?.name ?? 'not a valid edit' : 'custom';
   }
 
   dispose() {
     for (const c of [...this.group.children]) c.geometry.dispose();
     this.g.world.scene.remove(this.group);
-    for (const m of [this.keep, this.cut, this.hot]) m.dispose();
+    for (const m of [this.keep, this.cut, this.hot, this.bad]) m.dispose();
   }
 }

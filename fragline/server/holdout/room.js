@@ -8,9 +8,9 @@ import { armorStats, damageReduction, gunMult } from '../../shared/items.js';
 import { EL, ELEMENT_IDS } from '../../shared/elements.js';
 import { shieldBlocks, bloaterBurst, addHazard, updateHazards, updateSpecials, updatePlayerEffects, playerEffect } from './behaviors.js';
 import { FLYER_ALT } from './flyers.js';
-import { BMATS, MAT_IDS, KINDS, PIECE_COST, REPAIR_HP_PER_MAT, START_FRAC, REFUND, REACH, pieceBox, pieceBoxes, slotKey, checkPlacement, distToBox, validMask, unsupported } from '../../shared/build.js';
+import { BMATS, MAT_IDS, KINDS, PIECE_COST, REPAIR_HP_PER_MAT, START_FRAC, REFUND, KNIFE_BREAK, REACH, pieceBox, pieceBoxes, slotKey, checkPlacement, distToBox, validMask, rampEdit, unsupported } from '../../shared/build.js';
 import { ZTYPES, ZTYPE_IDS, ZCLASSES, ZCLASS_IDS, ZDROPS, CORE_ARMOR, coreHp, bossHp, bossFor, variantChance, hoarderCash } from '../../shared/zombies.js';
-import { ITEMS, RARITY, POWERUPS, BUFF, AMMO, AMMO_IDS, ARMOR_IDS, ATTACH_IDS, MAT_CAP, MONEY_CAP, CLASSES, SURVIVOR_CLASSES, intermissionFor, MAW_BREAK, rollLoot, rollDeploy } from '../../shared/holdout.js';
+import { ITEMS, RARITY, POWERUPS, BUFF, AMMO, AMMO_IDS, ARMOR_IDS, ATTACH_IDS, MAT_CAP, MONEY_CAP, CLASSES, SURVIVOR_CLASSES, SHIELD_CAP, ADREN_DROP, ADREN_CARRY, intermissionFor, MAW_BREAK, rollLoot, rollDeploy } from '../../shared/holdout.js';
 import { rayWorld, blocked } from '../../shared/physics.js';
 import { BoxGrid } from '../../shared/boxgrid.js';
 import { BaseRoom, nextUid } from '../baseRoom.js';
@@ -32,6 +32,7 @@ export const HOLDOUT = {
   countdown: 5000, readySkip: 3000, endScreen: 2500, // endScreen: the beat after a defeat before the map resets
   bleed: 30000, revive: 3000, reviveHp: 80, respawnSolo: 8000, respawnTeam: 12000,
   aiStep: 0.05, coreHeal: 60, chests: 6,
+  coreRegen: 2, coreRegenAfter: 4000, // passive HP/s inside the Core ring, starting this long (ms) after your last hit
 };
 const r2 = v => Math.round(v * 100) / 100;
 const r3 = v => Math.round(v * 1000) / 1000;
@@ -136,7 +137,7 @@ export class HoldoutRoom extends BaseRoom {
   isFull() { return this.players.length >= this.maxPlayers; }
   // building, harvesting, looting and breaking things only once the match has started
   started() { return this.phase === 'prep' || this.phase === 'wave' || this.phase === 'intermission'; }
-  notYet(p) { if (this.started()) return false; this.send(p, { t: 'deny', text: this.phase === 'lobby' || this.phase === 'countdown' ? 'Wait for the game to start — press Y when ready' : 'The match is over' }); return true; }
+  notYet(p) { if (this.started()) return false; this.send(p, { t: 'deny', text: this.phase === 'lobby' || this.phase === 'countdown' ? 'Wait for the game to start — press your ready key when ready' : 'The match is over' }); return true; }
   builds() { return [...this.pieces.values()].filter(isBuild); }
   activeCount() { return Math.max(1, this.players?.length || 0); }
   hasWeapon(p, w) { return carries(p, w); }
@@ -153,7 +154,7 @@ export class HoldoutRoom extends BaseRoom {
       ...freshBackpack(), mats: { ...HOLDOUT.startMats }, ready: false, carrying: null, buyback: null, cls: null, maxHp: 200, as: armorStats(null),
       st: { p: [0, 0, 0], v: [0, 0, 0], y: 0, pi: 0, c: 0, w: 'pistol', g: true },
       lastShot: {}, ping: 0, spawnPos: null, stats: freshStats(),
-      reviver: null, reviveProg: 0, reviveLast: 0, lastBuild: 0, lastRepair: 0, lastHarvest: 0, lastUse: 0, lastEdit: 0, lastCoreHealDeny: 0,
+      reviver: null, reviveProg: 0, reviveLast: 0, lastBuild: 0, lastRepair: 0, lastHarvest: 0, lastEdit: 0, lastCoreHealDeny: 0,
     };
   }
 
@@ -273,7 +274,11 @@ export class HoldoutRoom extends BaseRoom {
   waveCleared() {
     const w = this.wave;
     for (const p of this.players) {
-      if (p.cls === 'medic' && w % 2 === 0) { const left = giveItem(p, makeItem('medkit', 1)); if (left) this.inventory.dropNear(p, left); }
+      if (p.cls === 'medic' && w % 2 === 0) {
+        const n = Math.min(3, Math.max(0, ADREN_CARRY - countOf(p, 'adrenaline'))), extra = 3 - n;
+        if (n) { const left = giveItem(p, makeItem('adrenaline', n)); if (left) this.inventory.dropNear(p, left); }
+        if (extra) this.inventory.dropNear(p, makeItem('adrenaline', extra));
+      }
       p.money = Math.min(MONEY_CAP, p.money + 800 + 100 * w);
       for (const m of MAT_IDS) p.mats[m] = Math.min(MAT_CAP, p.mats[m] + HOLDOUT.waveMats[m]);
       if (p.downed) this.revive(p, null);
@@ -493,7 +498,8 @@ export class HoldoutRoom extends BaseRoom {
   lineOfSight(a, b) {
     const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], len = Math.hypot(...d);
     if (len < 0.3) return true;
-    const boxes = this.grid.query(Math.min(a[0], b[0]), Math.min(a[2], b[2]), Math.max(a[0], b[0]), Math.max(a[2], b[2]), []);
+    const boxes = this.grid.query(Math.min(a[0], b[0]), Math.min(a[2], b[2]), Math.max(a[0], b[0]), Math.max(a[2], b[2]), [])
+      .filter(x => x.ramp || !(a[0] > x.min[0] && a[0] < x.max[0] && a[1] >= x.min[1] && a[1] <= x.max[1] && a[2] > x.min[2] && a[2] < x.max[2])); // a turret under a cone still sees out
     const hit = rayWorld(a, d.map(v => v / len), len, boxes);
     return !hit || hit.t >= len - 0.3;
   }
@@ -616,7 +622,7 @@ export class HoldoutRoom extends BaseRoom {
     }
     s.hp -= dmg;
     this.flowDirty = true;
-    if (s.hp <= 0) this.removePiece(s, 'broken');
+    if (s.hp < 1) this.removePiece(s, 'broken'); // < 1, not <= 0: float residue from growing must not cost an extra hit
     else this.dirtyPieces.add(s);
   }
 
@@ -657,7 +663,10 @@ export class HoldoutRoom extends BaseRoom {
       if (q) { q.money = Math.min(MONEY_CAP, q.money + Math.round(reward / 2)); this.sendInv(q); }
     }
     if (!z.noReward) this.typeDrop(z);
-    if (!z.noReward && this.rng() < 0.03) this.inventory.spawn({ kind: 'item', id: 'adrenaline', n: 1 }, [z.pos[0], z.pos[1] + 0.2, z.pos[2]]);
+    if (!z.noReward) { // Adrenaline Shots, the carried heal: a chance on any kill, big zombies always carry a few
+      const big = ADREN_DROP.big.includes(z.type);
+      if (big || this.rng() < ADREN_DROP.chance) this.inventory.spawn({ kind: 'item', id: 'adrenaline', n: big ? 1 + Math.floor(this.rng() * 3) : 1 }, [z.pos[0], z.pos[1] + 0.2, z.pos[2]]);
+    }
     if (z.t.burst) bloaterBurst(this, z);
     if (z.t.boss) { // bosses drop guns, ammo, materials and survivor supplies
       this.inventory.scatter(rollLoot('boss'), [z.pos[0], z.pos[1], z.pos[2]], 2.2, true);
@@ -749,7 +758,6 @@ export class HoldoutRoom extends BaseRoom {
     if (Array.isArray(m.sky) && w.cat === 'sniper') { // weak points of the Colossus: snipers only
       for (const [i, k] of m.sky.slice(0, 1)) this.sky.hit(p, i | 0, m.o, m.d?.[k | 0], w.dmg * 2 * mult, now);
     }
-    if (Array.isArray(m.pr) && w.cat !== 'melee' && this.started()) this.shootProps(p, w, m, mult);
     if (Array.isArray(m.maw) && w.cat !== 'melee') for (const [k, key] of m.maw.slice(0, w.pellets)) this.bosses.hitMaw(p, m.o, m.d?.[k | 0], w.dmg * mult, key);
     if (!Array.isArray(m.h) || !m.h.length) return;
     const byZombie = new Map();
@@ -782,20 +790,7 @@ export class HoldoutRoom extends BaseRoom {
     }
   }
 
-  // Bullets chip away at map props (walls, crates, houses): [[prop piece id, ray index]] per pellet.
-  shootProps(p, w, m, mult) {
-    const dmg = new Map();
-    for (const c of m.pr.slice(0, w.pellets)) {
-      const s = Array.isArray(c) ? this.pieces.get(c[0] | 0) : null, d = m.d?.[c[1] | 0];
-      if (!s || s.kind !== 'prop' || !Array.isArray(d) || d.length !== 3 || !d.every(Number.isFinite)) continue;
-      const l = Math.hypot(...d);
-      if (!l || !rayWorld(m.o, d.map(v => v / l), 90, [s.box])) continue;
-      dmg.set(s, (dmg.get(s) || 0) + w.dmg * 0.4 * mult);
-    }
-    for (const [s, v] of dmg) this.damagePiece(s, v);
-  }
-
-  // Explosions break props too (never your own builds).
+  // The Maw's eruption tears up map props too. Player guns and explosives never damage props or builds.
   damageProps(at, radius, dmg) {
     if (!this.started()) return;
     for (const s of this.props.values()) {
@@ -913,10 +908,11 @@ export class HoldoutRoom extends BaseRoom {
 
   // ---------- building ----------
   placementWorld(p) {
+    const trapped = [...this.defenses.list.values()].filter(d => d.side === 0).map(d => this.pieces.get(d.pid)).filter(Boolean); // floors carrying a floor trap
     return {
       slots: this.slots, pieces: this.builds().flatMap(s => s.boxes), statics: [...this.statics, ...[...this.props.values()].filter(s => this.pieces.get(s.id) === s).map(s => s.box)],
       nodes: this.aliveNodeBoxes(), zombies: [...this.zombies.values()].map(z => ({ x: z.pos[0], y: z.pos[1], z: z.pos[2], s: z.s })),
-      eye: this.eye(p), mats: p.mats, core: this.map.core, zone: this.map.zone,
+      eye: this.eye(p), mats: p.mats, core: this.map.core, zone: this.map.zone, trapped: new Set(trapped.map(slotKey)),
     };
   }
 
@@ -924,7 +920,7 @@ export class HoldoutRoom extends BaseRoom {
     if (!p.alive || p.downed || this.notYet(p)) return;
     const now = Date.now();
     if (now - p.lastBuild < 80) return;
-    const piece = { kind: m.kind, i: m.i, k: m.k, l: m.l, o: m.kind === 'floor' ? 0 : m.o, mat: m.mat };
+    const piece = { kind: m.kind, i: m.i, k: m.k, l: m.l, o: m.kind === 'wall' || m.kind === 'ramp' ? m.o : 0, mat: m.mat };
     const why = checkPlacement(piece, this.placementWorld(p));
     if (why) return this.send(p, { t: 'deny', text: why });
     p.lastBuild = now;
@@ -986,20 +982,23 @@ export class HoldoutRoom extends BaseRoom {
     return s && isBuild(s) && p.alive && !p.downed && distToBox(this.eye(p), s.box) <= REACH ? s : null;
   }
 
-  // Fortnite-style edit: doors, windows, arches, half walls, floor holes, half ramps.
+  // Fortnite-style edit: wall templates (windows, doors, arches, triangles, half walls), floor holes, and stairs
+  // turned or halved by a drag (m.path: their 2 × 2 tiles in drag order).
   onEdit(p, m) {
     if (this.notYet(p)) return;
     const s = this.reachable(p, m.id), now = Date.now();
-    if (!s || !validMask(s.kind, m.mask) || s.mask === m.mask || now - p.lastEdit < 150) return;
+    const e = s && (s.kind === 'ramp' && m.path !== undefined ? rampEdit(m.path) : { o: s.o, mask: m.mask });
+    if (!e || !validMask(s.kind, e.mask) || (s.mask === e.mask && s.o === e.o) || now - p.lastEdit < 150) return;
     p.lastEdit = now;
     for (const b of s.boxes) this.grid.remove(b);
-    s.mask = m.mask;
+    s.mask = e.mask;
+    if (s.o !== e.o) { s.o = e.o; s.box = pieceBox(s); }
     s.boxes = pieceBoxes(s);
     for (const b of s.boxes) this.grid.add(b);
     this.defenses.pieceChanged(s, true);
     this.flowDirty = true;
     this.integrityDirty = true;
-    this.broadcast({ t: 'sedit', id: s.id, mask: s.mask });
+    this.broadcast({ t: 'sedit', id: s.id, mask: s.mask, o: s.o });
   }
 
   // One material, no upgrade path — kept as a no-op so a stray client message is refused cleanly.
@@ -1027,22 +1026,20 @@ export class HoldoutRoom extends BaseRoom {
     this.sendInv(p);
   }
 
-  onDemolish(p, m) {
-    if (this.notYet(p)) return;
-    const s = this.reachable(p, m.id);
-    if (!s) return;
-    if (s.owner !== p.id) return this.send(p, { t: 'deny', text: 'Only the builder can remove this' });
-    this.removePiece(s, 'demolish');
-    p.mats[s.mat] = Math.min(MAT_CAP, p.mats[s.mat] + REFUND);
-    this.sendInv(p);
-  }
-
-  // Knife on a map prop: materials, and the prop takes a beating.
-  onHarvestProp(p, m) {
-    const s = this.pieces.get(m.prop | 0), now = Date.now();
-    if (!s || s.kind !== 'prop' || !p.alive || p.downed || p.st.w !== 'knife' || now - p.lastHarvest < 280 || this.notYet(p)) return;
+  // Knife on a map prop: materials, and the prop takes a beating. On a built piece: no materials, it just
+  // breaks down (the builder gets REFUND back when their own hit brings it down). Only the builder may break
+  // a piece, unless they've left the room.
+  onHarvestPiece(p, m) {
+    const s = this.pieces.get(m.sid | 0), now = Date.now();
+    if (!s || !p.alive || p.downed || p.st.w !== 'knife' || now - p.lastHarvest < 280 || this.notYet(p)) return;
     if (distToBox(this.eye(p), s.box) > 2.8) return;
     p.lastHarvest = now;
+    if (isBuild(s)) {
+      if (s.owner !== p.id && this.players.some(q => q.id === s.owner)) return this.send(p, { t: 'deny', text: 'Only the builder can break this' });
+      this.damagePiece(s, KNIFE_BREAK);
+      if (s.owner === p.id && this.pieces.get(s.id) !== s) { p.mats[s.mat] = Math.min(MAT_CAP, p.mats[s.mat] + REFUND); this.sendInv(p); }
+      return;
+    }
     const mat = PROP_TYPES[s.mat].mat, amount = 7;
     p.mats[mat] = Math.min(MAT_CAP, p.mats[mat] + amount);
     p.stats.harvested += amount;
@@ -1052,7 +1049,7 @@ export class HoldoutRoom extends BaseRoom {
   }
 
   onHarvest(p, m) {
-    if (m.prop !== undefined) return this.onHarvestProp(p, m);
+    if (m.sid !== undefined) return this.onHarvestPiece(p, m);
     if (this.notYet(p)) return;
     const n = this.nodes[m.id | 0], now = Date.now();
     if (!n || n.hp <= 0 || !p.alive || p.downed || p.st.w !== 'knife' || now - p.lastHarvest < 280) return;
@@ -1097,19 +1094,21 @@ export class HoldoutRoom extends BaseRoom {
     this.broadcast({ t: 'msg', text: `${p.name} is playing ${c.name}` });
   }
 
-  // Medics: heal themselves after a few quiet seconds and everyone standing near them (players and survivors).
-  // Medic-class survivors do the same on a much smaller scale (SURVIVOR_CLASSES.medic).
+  // Passive healing, 4×/s: anyone resting inside the Core ring (HOLDOUT.coreRegen). Medics heal themselves after a
+  // few quiet seconds and everyone standing near them (players and survivors); Medic-class survivors do the same
+  // on a much smaller scale (SURVIVOR_CLASSES.medic).
   updateMedics(now) {
     if (now - (this.medicAt || 0) < 250) return;
     this.medicAt = now;
+    for (const p of this.players) if (this.canBuy(p) && now - (p.hurtAt || 0) > HOLDOUT.coreRegenAfter) this.healPlayer(p, HOLDOUT.coreRegen * 0.25);
     const M = CLASSES.medic;
     for (const m of this.players) {
       if (m.cls !== 'medic' || !m.alive || m.downed) continue;
       if (now - (m.hurtAt || 0) > 3000) this.healPlayer(m, M.regen * 0.25);
       for (const q of this.players) if (q !== m && q.alive && !q.downed && Math.hypot(q.st.p[0] - m.st.p[0], q.st.p[2] - m.st.p[2]) <= M.auraR) this.healPlayer(q, M.aura * 0.25);
       for (const sv of this.survivors.list.values()) if (sv.state === 'active' && Math.hypot(sv.pos[0] - m.st.p[0], sv.pos[2] - m.st.p[2]) <= M.auraR) this.survivors.heal(sv, M.aura * 0.25 * 1.5);
-      if (m.shield < ITEMS.shield.cap && this.canBuy(m)) { // Medic passive: shield regen near the Core
-        m.shield = Math.min(ITEMS.shield.cap, m.shield + M.coreShieldRegen * 0.25);
+      if (m.shield < SHIELD_CAP && this.canBuy(m)) { // Medic passive: shield regen near the Core
+        m.shield = Math.min(SHIELD_CAP, m.shield + M.coreShieldRegen * 0.25);
         this.send(m, { t: 'vit', hp: Math.round(m.hp), sh: Math.round(m.shield) });
       }
     }
@@ -1145,41 +1144,17 @@ export class HoldoutRoom extends BaseRoom {
     this.core.hp = Math.min(this.core.max, this.core.hp + HOLDOUT.coreHeal * dt);
   }
 
-  // bandages, medkits and shield potions — on yourself, or (heals) on a survivor you're looking after
+  // Adrenaline Shot, the one carried heal (its key, a sack key, or LMB with it in hand): instant +HP and +shield, each
+  // capped, then a short regen (updateAdrenaline). A Medic's shots are 25% stronger. Only ever on yourself.
   onUse(p, m) {
-    const it = ITEMS[m.item], now = Date.now(), deny = text => this.send(p, { t: 'deny', text });
-    if (!it || !p.alive || p.downed) return;
-    if (it.kind === 'adrenaline') return this.onAdrenaline(p, it, now);
-    if ((it.kind !== 'heal' && it.kind !== 'shield') || !(countOf(p, m.item) > 0)) return;
-    if (now - p.lastUse < it.time * 800) return;
-    if (m.sv !== undefined) {
-      const sv = this.survivors.list.get(m.sv | 0);
-      if (!sv || it.kind !== 'heal' || Math.hypot(sv.pos[0] - p.st.p[0], sv.pos[2] - p.st.p[2]) > 3.2) return;
-      if (sv.hp >= sv.maxHp * (it.cap / 100)) return deny(`${sv.name} doesn't need that`);
-      this.survivors.heal(sv, Math.min(sv.maxHp * (it.cap / 100) - sv.hp, sv.maxHp * (it.hp / 100) * 1.5 * (p.cls === 'medic' ? CLASSES.medic.healMul : 1)));
-      p.lastUse = now;
-      takeItem(p, m.item, 1);
-      this.sendInv(p);
-      return;
-    }
-    const healMul = p.cls === 'medic' ? CLASSES.medic.healMul : 1;
-    if (it.kind === 'heal') { const cap = (it.cap / 100) * p.maxHp; if (p.hp >= cap) return deny('Already healed'); p.hp = Math.min(cap, p.hp + (it.hp / 100) * p.maxHp * healMul); }
-    else { if (p.shield >= it.cap) return deny('Shields are full'); p.shield = Math.min(it.cap, p.shield + it.sh * healMul); }
-    p.lastUse = now;
+    const it = ITEMS[m.item], now = Date.now();
+    if (it?.kind !== 'adrenaline' || !p.alive || p.downed || !(countOf(p, m.item) > 0) || now - (p.lastAdrenaline || 0) < it.cooldown) return;
+    if (p.hp >= p.maxHp && p.shield >= SHIELD_CAP) return this.send(p, { t: 'deny', text: 'Already topped up' });
+    const mul = p.cls === 'medic' ? CLASSES.medic.healMul : 1;
     takeItem(p, m.item, 1);
-    this.sendInv(p);
-    this.broadcastRoster();
-  }
-
-  // Adrenaline Shot: instant heal (overflowing into shield), then a short regen + damage + speed boost.
-  onAdrenaline(p, it, now) {
-    if (!(countOf(p, 'adrenaline') > 0) || now - (p.lastAdrenaline || 0) < it.cooldown) return;
-    takeItem(p, 'adrenaline', 1);
     p.lastAdrenaline = now;
-    const addHp = Math.min(it.hp, p.maxHp - p.hp);
-    p.hp += addHp;
-    const overflow = it.hp - addHp;
-    if (overflow > 0) p.shield = Math.min(ITEMS.shield.cap, p.shield + overflow);
+    p.hp = Math.min(p.maxHp, p.hp + it.hp * mul);
+    p.shield = Math.min(SHIELD_CAP, p.shield + it.sh * mul);
     p.adrenUntil = now + it.time * 1000;
     this.send(p, { t: 'boost', ms: it.time * 1000 });
     this.send(p, { t: 'vit', hp: Math.round(p.hp), sh: Math.round(p.shield) });
@@ -1187,18 +1162,13 @@ export class HoldoutRoom extends BaseRoom {
     this.broadcastRoster();
   }
 
-  // Adrenaline's +7 HP/s regen (also overflowing into shield) while its buff is active.
+  // an Adrenaline Shot's regen (ITEMS.adrenaline.regen HP/s, a Medic's 25% more) while it lasts, 4×/s
   updateAdrenaline(now) {
     if (now - (this.adrenAt || 0) < 250) return;
     this.adrenAt = now;
     const R = ITEMS.adrenaline;
     for (const p of this.players) {
-      if (!p.alive || p.downed || now >= (p.adrenUntil || 0)) continue;
-      const add = R.regen * 0.25, addHp = Math.min(add, p.maxHp - p.hp);
-      p.hp += addHp;
-      const overflow = add - addHp;
-      if (overflow > 0) p.shield = Math.min(ITEMS.shield.cap, p.shield + overflow);
-      this.send(p, { t: 'vit', hp: Math.round(p.hp), sh: Math.round(p.shield) });
+      if (p.alive && !p.downed && now < (p.adrenUntil || 0)) this.healPlayer(p, R.regen * 0.25 * (p.cls === 'medic' ? CLASSES.medic.healMul : 1));
     }
   }
 
@@ -1217,10 +1187,9 @@ export class HoldoutRoom extends BaseRoom {
     this.broadcast({ t: 'task', text: 'THE BLACKSMITH is at the Core: tier III forging, elements, attachments and turret upgrades' });
   }
 
-  // guns, rockets and explosives: team damage boost, the Assault class, the Firepower team upgrade and an Adrenaline Shot
+  // guns, rockets and explosives: team damage boost, the Assault class and the Firepower team upgrade
   dmgMultFor(p) {
-    return (this.buffActive('damage') ? BUFF.damage : 1) * (p?.cls === 'assault' ? 1.2 : 1) * (1 + 0.08 * (this.teamUps?.firepower || 0)) *
-      (p && Date.now() < (p.adrenUntil || 0) ? ITEMS.adrenaline.dmgMult : 1);
+    return (this.buffActive('damage') ? BUFF.damage : 1) * (p?.cls === 'assault' ? 1.2 : 1) * (1 + 0.08 * (this.teamUps?.firepower || 0));
   }
 
   // Vitality team upgrade scales max HP off the class base (or 200 with no class).
@@ -1275,7 +1244,6 @@ export class HoldoutRoom extends BaseRoom {
       case 'edit': return this.onEdit(p, m);
       case 'upgrade': return this.onUpgrade(p, m);
       case 'repair': return this.onRepair(p, m);
-      case 'demolish': return this.onDemolish(p, m);
       case 'harvest': return this.onHarvest(p, m);
       case 'revive': return this.onRevive(p, m);
       case 'ready': return this.onReady(p, !!m.on);

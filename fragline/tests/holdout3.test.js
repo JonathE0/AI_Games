@@ -58,20 +58,9 @@ test('everything on the map breaks except the Core: props take hits, give materi
   if (b.max[2] - b.min[2] > b.max[0] - b.min[0]) p.st.p = [b.max[0] + 1, 0, (b.min[2] + b.max[2]) / 2];
   p.st.w = 'knife';
   const zink = p.mats.zink;
-  room.handle(p, { t: 'harvest', prop: wall.id });
+  room.handle(p, { t: 'harvest', sid: wall.id });
   assert.ok(p.mats.zink > zink, 'harvesting a wall gives Zinkonium');
   assert.ok(wall.hp < wall.maxHp);
-  // guns chip props (validated against the prop's box)
-  p.inv[1] = makeGun('ar');
-  const c = [(b.min[0] + b.max[0]) / 2, 1.5, (b.min[2] + b.max[2]) / 2], o = [p.st.p[0], 1.6, p.st.p[2]];
-  const d = c.map((v, i) => v - o[i]), l = Math.hypot(...d);
-  const hp = wall.hp;
-  T += 1000;
-  room.handle(p, { t: 'shot', w: 'ar', o, d: [d.map(v => v / l)], e: [], h: [], pr: [[wall.id, 0]] });
-  assert.ok(wall.hp < hp, 'bullets chip the wall');
-  T += 1000;
-  room.handle(p, { t: 'shot', w: 'ar', o, d: [[0, 1, 0]], e: [], h: [], pr: [[wall.id, 0]] });
-  assert.ok(wall.hp > hp - 60, 'a claim that does not line up is ignored');
   // a roof comes down when every wall under it is gone
   const roof = [...room.props.values()].find(s => s.mat === 'h');
   const under = [...room.props.values()].filter(s => s !== roof && s.box.max[1] >= roof.box.min[1] - 0.06
@@ -80,7 +69,7 @@ test('everything on the map breaks except the Core: props take hits, give materi
   for (const s of under) room.removePiece(s, 'broken');
   advance(room, 2000);
   assert.equal(room.pieces.get(roof.id), undefined, 'the roof collapsed');
-  // explosions break props, the Core is not a prop
+  // the Core is not a prop
   assert.ok(![...room.props.values()].some(s => s.box.min[0] <= 0 && s.box.max[0] >= 0 && s.box.min[2] <= 0 && s.box.max[2] >= 0));
   assert.equal(PROP_TYPES.c.hp, 900);
 });
@@ -91,16 +80,16 @@ test('nothing breaks and nothing gets built before the game starts', () => {
   const prop = [...room.props.values()][0];
   p.st.p = [(prop.box.min[0] + prop.box.max[0]) / 2, 0, prop.box.max[2] + 1];
   p.st.w = 'knife';
-  room.handle(p, { t: 'harvest', prop: prop.id });
+  room.handle(p, { t: 'harvest', sid: prop.id });
   assert.equal(prop.hp, prop.maxHp);
   assert.match(a.last('deny').text, /Wait for the game/);
   room.damageProps([0, 0, 0], 100, 10000);
   assert.equal(room.props.size, [...room.props.values()].filter(s => room.pieces.get(s.id) === s).length, 'no prop destroyed in the lobby');
 });
 
-test('survivors: tiers carry different guns, heal passively but very slowly, bandages patch them up faster', () => {
+test('survivors: tiers carry different guns, heal passively but very slowly', () => {
   const room = started(new HoldoutRoom('V', {}));
-  const a = join(room, 'A'), p = a.player;
+  join(room, 'A');
   assert.ok(rescueWave(3) && rescueWave(7) && rescueWave(11) && !rescueWave(5));
   assert.equal(SURVIVOR.tiers.map(t => t.gun).join(','), 'Pistol,SMG,Assault Rifle,DMR');
   const sv = room.survivors.spawnWounded(OUTPOST_SHELTERS[0], 2, 'ranger');
@@ -116,12 +105,6 @@ test('survivors: tiers carry different guns, heal passively but very slowly, ban
   room.phaseEnd = T + 60000;
   advance(room, 5000);
   assert.ok(Math.abs(sv.hp - 105) < 0.1, `passive regen is +1 HP/s (very slow): ${sv.hp}`);
-  const beforeBandage = sv.hp;
-  addItem(p, 'bandage', 2);
-  p.st.p = [sv.pos[0] + 1, 0, sv.pos[2]];
-  room.handle(p, { t: 'use', item: 'bandage', sv: sv.id });
-  assert.ok(sv.hp > beforeBandage + 10, 'a bandage heals far more than a few seconds of passive regen');
-  assert.equal(countOf(p, 'bandage'), 1);
 });
 
 test('turrets cost 1.5x; traps and deployables are separate kinds', () => {

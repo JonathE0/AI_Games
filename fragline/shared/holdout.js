@@ -28,17 +28,14 @@ export const AMMO_IDS = Object.keys(AMMO);
 export const START_AMMO = { light: 180, medium: 60, heavy: 0, shells: 0, rockets: 0 };
 export const MAT_CAP = 999;
 
-// kind: throw (T), heal / shield (H), trap (on your floors / walls) and deploy (turrets & campfires on the ground),
-// both placed from build mode.
+// kind: throw (T), adrenaline (its own key / the sack), trap (on your floors / walls) and deploy (turrets &
+// campfires on the ground), both placed with their building keys.
 export const ITEMS = {
   grenade: { name: 'Grenade', kind: 'throw', price: 300, max: 6, dmg: 190, radius: 4.5, fuse: 1.6 },
   molotov: { name: 'Molotov', kind: 'throw', price: 350, max: 6, dps: 40, radius: 3.6, burn: 7 },
   freeze: { name: 'Freeze Grenade', kind: 'throw', price: 400, max: 6, radius: 5, freeze: 4 },
-  bandage: { name: 'Bandage', kind: 'heal', price: 150, max: 10, time: 3, hp: 15, cap: 75 },
-  medkit: { name: 'Medkit', kind: 'heal', price: 500, max: 3, time: 6, hp: 100, cap: 100 },
-  shield_s: { name: 'Small Shield', kind: 'shield', price: 300, max: 6, time: 2, sh: 25, cap: 50 },
-  shield: { name: 'Shield Potion', kind: 'shield', price: 600, max: 3, time: 4, sh: 50, cap: 100 },
-  adrenaline: { name: 'Adrenaline Shot', kind: 'adrenaline', price: 600, max: 3, hp: 60, time: 8, regen: 7, dmgMult: 1.2, speedMult: 1.15, cooldown: 2000 },
+  // the only carried heal: instant +hp and +sh (each capped), then +regen HP/s for `time` s; cooldown in ms
+  adrenaline: { name: 'Adrenaline Shot', kind: 'adrenaline', price: 300, max: 10, hp: 25, sh: 25, time: 5, regen: 4, cooldown: 1500 },
   spikes: { name: 'Floor Spikes', kind: 'trap', mount: 'floor', price: 300, max: 10 },
   darts: { name: 'Wall Darts', kind: 'trap', mount: 'wall', price: 350, max: 10 },
   flame: { name: 'Flame Grill', kind: 'trap', mount: 'floor', price: 450, max: 10 },
@@ -55,7 +52,14 @@ export const ITEM_IDS = Object.keys(ITEMS);
 export const THROWABLES = ITEM_IDS.filter(id => ITEMS[id].kind === 'throw');
 export const TRAPS = ITEM_IDS.filter(id => ITEMS[id].kind === 'trap');
 export const DEPLOYS = ITEM_IDS.filter(id => ITEMS[id].kind === 'deploy');
-export const HEALS = ['bandage', 'medkit', 'shield_s', 'shield'];
+export const SHIELD_CAP = 100; // the most shield anyone can hold
+// Hard cap on total Adrenaline Shots carried at once (hotbar + backpack + sack combined) — same number as the
+// stack size, so a player never needs more than one stack's worth. Pickups/buys/chest moves/grants past this
+// leave the rest behind (see server/holdout/inventory.js and room.js).
+export const ADREN_CARRY = ITEMS.adrenaline.max;
+// Adrenaline Shot drops (server/holdout/room.js killZombie): any kill has a chance at one, these big zombies always
+// drop 1-3; bosses carry 1-3 in their loot pile (rollLoot 'boss').
+export const ADREN_DROP = { chance: 0.12, big: ['brute', 'warden', 'golem'] };
 
 // Attachments: one per slot on each gun.
 export const ATTACH = {
@@ -147,7 +151,6 @@ export const SHOP = [
   ['Snipers', ['h_ssg', 'h_awp']],
   ['Ammo', Object.keys(AMMO_ITEMS)],
   ['Throwables', THROWABLES],
-  ['Healing', HEALS],
   ['Adrenaline', ['adrenaline']],
   ['Traps', TRAPS],
   ['Turrets & Deployables', DEPLOYS],
@@ -193,7 +196,9 @@ export function rollRarity(rng, weights) {
   return 0;
 }
 const ammoFor = (id, n = 1) => (WEAPONS[id].ammo ? { kind: 'ammo', type: WEAPONS[id].ammo, n: Math.round(AMMO[WEAPONS[id].ammo].pack * n * 1.5) } : null);
-const anyItem = rng => ({ kind: 'item', id: pick(rng, [...THROWABLES, ...HEALS]), n: 1 });
+const adren = (n0, n1, rng) => ({ kind: 'item', id: 'adrenaline', n: n0 + Math.floor(rng() * (n1 - n0 + 1)) });
+// a throwable, or (the 4-in-7 share the old heal items had) a stack of 2-4 Adrenaline Shots
+const anyItem = rng => (rng() < 4 / 7 ? adren(2, 4, rng) : { kind: 'item', id: pick(rng, THROWABLES), n: 1 });
 const mats = n => ({ kind: 'mats', mat: 'zink', n });
 // a looted gun: rarity roll, a chance of an element, a chance of a higher tier
 const lootGun = (rng, w, rw, elChance, t2 = 0, t3 = 0) => {
@@ -243,7 +248,7 @@ export function rollLoot(kind, rng = Math.random) {
   } else {
     for (let i = 0; i < 2; i++) { const w = pick(rng, [...LOOT_GUNS, 'rocket', 'minigun', 'gl', 'kinetic']); out.push({ ...lootGun(rng, w, [0, 0, 0, 1, 1], 0.6, 1, 0.35) }, ammoFor(w, 2)); }
     out.push(lootArmor(rng, 1, 0.35), lootAttach(rng), deployItem(rng, 4)); // best odds in the game at a good turret
-    out.push(anyItem(rng), anyItem(rng), anyItem(rng), mats(675), { kind: 'svsupply' }); // was 3x225 split across wood/stone/metal
+    out.push(anyItem(rng), anyItem(rng), anyItem(rng), adren(1, 3, rng), mats(675), { kind: 'svsupply' }); // was 3x225 split across wood/stone/metal
   }
   return out.filter(Boolean);
 }
@@ -277,7 +282,7 @@ export const CLASSES = {
   },
   medic: {
     name: 'Medic', hp: 200, speed: 1, regen: 6, aura: 8, auraR: 5, revive: 0.5, healMul: 1.25, coreShieldRegen: 2,
-    desc: 'Heals over time and heals people near you · revives twice as fast · healing items are 25% stronger · a free medkit every 2 waves · regenerates shield near the Core',
+    desc: 'Heals over time and heals people near you · revives twice as fast · Adrenaline Shots are 25% stronger · 3 free Adrenaline Shots every 2 waves · regenerates shield near the Core',
   },
 };
 // how much of an ammo type you can carry (Assault carries more)
@@ -309,8 +314,8 @@ export const SURVIVOR_CLASS_IDS = Object.keys(SURVIVOR_CLASSES);
 
 // ---------- survivors ----------
 // Survivors come in tiers (raw gun quality: hp/dmg/rpm/hit/range/mag/ammo) crossed with a class (which
-// actual gun they carry — see SURVIVOR_CLASSES[cls].guns — and their look). They never heal on their own
-// (medics, campfires and your bandages / medkits can patch them up) and a dead survivor is gone for good.
+// actual gun they carry — see SURVIVOR_CLASSES[cls].guns — and their look). They heal very slowly on their own
+// (Medics, Medic survivors and Rally Fires patch them up faster) and a dead survivor is gone for good.
 export const SURVIVOR = {
   speed: 3.4, reload: 2.2, retreat: 6, leash: 14, // retreat: back off when a zombie is this close; leash: max stray from the Core
   tiers: [

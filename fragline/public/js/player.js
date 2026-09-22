@@ -27,7 +27,7 @@ export class LocalPlayer {
   get eye() { return [this.pos[0], this.pos[1] + eyeHeight(this.crouch), this.pos[2]]; }
   get speed() { return Math.hypot(this.vel[0], this.vel[2]); }
 
-  // input: { f, b, l, r, walk, crouch, jump } (0/1). Returns events { jumped, landed, step }.
+  // input: { f, b, l, r, crouch, jump } (0/1). Returns events { jumped, landed, step }.
   // bhop = Krunker-style bunny hopping: no landing slowdown, snappier air strafing, speed capped.
   tick(dt, input, maxSpeed, boxes, frozen, bhop = false, phys = {}) {
     const ev = {};
@@ -69,7 +69,7 @@ export class LocalPlayer {
       return ev;
     }
     const crouched = this.crouch > 0.5 && this.grounded;
-    let wish = frozen || !this.alive || wl === 0 ? 0 : maxSpeed * (crouched ? P.crouchMul : input.walk ? P.walkMul : 1);
+    let wish = frozen || !this.alive || wl === 0 ? 0 : maxSpeed * (crouched ? P.crouchMul : 1);
     if (this.tag > 0) wish *= 0.55;
     if (this.landSlow > 0) wish *= 0.8;
     this.tag = Math.max(0, this.tag - dt);
@@ -110,7 +110,7 @@ export class LocalPlayer {
       if (!bhop && -vyBefore > 4) this.landSlow = 0.25; // CS2-style landing penalty only without bhop
     }
 
-    // Running is loud; walking (shift) and crouching are silent — just like CS.
+    // Running is loud; crouching (or anything slower) is silent — just like CS.
     const sp = this.speed;
     if (this.grounded && sp > 3.4) {
       this.stepDist += sp * dt;

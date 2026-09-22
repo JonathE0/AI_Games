@@ -5,7 +5,7 @@ export const P = {
   radius: 0.4, standH: 1.8, crouchH: 1.32, standEye: 1.64, crouchEye: 1.2,
   step: 0.45, gravity: 20, jumpV: 6.8,
   friction: 5.2, stopSpeed: 2.0, accel: 5.5, airAccel: 12, airCap: 0.76,
-  walkMul: 0.52, crouchMul: 0.34,
+  crouchMul: 0.34,
 };
 
 // Bullet penetration resistance per meter of material (Infinity = bullets stop). Damage left after a

@@ -233,7 +233,7 @@ export class Weapons {
     if (!input.fire) this.triggerDown = false;
     if (!g.player.alive || !g.canShoot() || now < this.deployEnd) { this.burstLeft = 0; return; }
 
-    if (w.cat === 'item') return; // held grenades / medkits / traps are used by the Holdout controller
+    if (w.cat === 'item') return; // held grenades / adrenaline shots / traps are used by the Holdout controller
     if (w.cat === 'melee') {
       if (now >= this.nextFire && (input.fire || input.alt)) this.knife(!input.fire);
       return;
@@ -296,7 +296,7 @@ export class Weapons {
       return;
     }
     const target = g.shotTargets(), sky = w.cat === 'sniper' ? g.holdout?.skyTargets() : null, balloons = g.holdout?.balloonTargets(), maw = g.holdout?.mawTargets();
-    const dirs = [], ends = [], hits = [], skyHits = [], bal = [], props = [], mawHits = [];
+    const dirs = [], ends = [], hits = [], skyHits = [], bal = [], mawHits = [];
     let heard = false;
     for (let k = 0; k < w.pellets; k++) {
       let yaw = baseYaw, pitch = basePitch;
@@ -329,8 +329,6 @@ export class Weapons {
           const snd = im.mat === 'w' || im.mat === 'W' ? '_w' : im.mat === 'm' || im.mat === 'M' ? '_m' : '';
           if (!heard && !im.exit) { g.sound.play('impact' + snd, { pos: at(im.t), vol: 0.35, ref: 2 }); heard = true; }
         }
-        const prop = tr.impacts.find(im => !im.exit && im.box?.prop); // Holdout: bullets chip map props
-        if (prop) props.push([prop.box.sid, k]);
         if (tr.player) {
           hits.push({ part: tr.player.part, pen: r3(tr.player.pen), id: tr.player.id, k }); // k: pellet (its direction is d[k])
           g.world.blood(end, d, tr.player.part === 'head');
@@ -365,7 +363,6 @@ export class Weapons {
     const msg = { t: 'shot', w: w.id, uid: this.cur.uid, o: eye.map(r3), d: dirs, e: ends, h: hits };
     if (skyHits.length) msg.sky = skyHits;
     if (bal.length) msg.bal = bal;
-    if (props.length) msg.pr = props;
     if (mawHits.length) msg.maw = mawHits;
     g.net.send(msg);
 

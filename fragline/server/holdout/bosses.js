@@ -213,7 +213,7 @@ export class Bosses {
     this.maw = { hp, max: hp, dead: false, mode: 'enter', x: edge[0], z: edge[1], until: now + 4500, target: null, stage: 1, devoured: 0, devourAt: 0, dmgInWind: 0, t0: now, need: n >= 2 ? 2 : 1 };
     this.thumpers = THUMPER_SPOTS.map(s => ({ ...s, state: 'idle', until: 0, prog: 0, by: null }));
     room.broadcast({ t: 'maw', ev: 'enter', x: r2(edge[0]), z: r2(edge[1]), hp, max: hp, need: this.maw.need });
-    room.broadcast({ t: 'task', text: `THE MAW hunts beneath the Outpost — arm ${this.maw.need === 1 ? 'a seismic thumper' : 'two seismic thumpers at once'} (hold E, in the houses) to lure it up, then shoot its throat` });
+    room.broadcast({ t: 'task', text: `THE MAW hunts beneath the Outpost — arm ${this.maw.need === 1 ? 'a seismic thumper' : 'two seismic thumpers at once'} (hold your use key, in the houses) to lure it up, then shoot its throat` });
     this.syncThumpers();
   }
 

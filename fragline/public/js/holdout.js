@@ -4,10 +4,10 @@
 // chest, shop, boss bar, revive / use rings, name tags and the end-of-match report. The server is authoritative.
 import * as THREE from 'three';
 import { OUTPOST, OUTPOST_STATIC, CORE_LADDERS } from '/shared/outpost.js';
-import { BMATS, MAT_IDS, REACH, distToBox } from '/shared/build.js';
+import { BMATS, MAT_IDS, REACH, distToBox, slotKey } from '/shared/build.js';
 import { WAVES } from '/shared/zombies.js';
 import { WEAPONS } from '/shared/weapons.js';
-import { RARITY, AMMO, ITEMS, POWERUPS, BUFF, THROWABLES, HEALS, SURVIVOR, SURVIVOR_CLASSES, ARMOR, CLASSES, SMITH, CORE_UP_IDS } from '/shared/holdout.js';
+import { RARITY, AMMO, ITEMS, POWERUPS, BUFF, THROWABLES, SURVIVOR, SURVIVOR_CLASSES, ARMOR, CLASSES, SMITH, CORE_UP_IDS, ADREN_CARRY } from '/shared/holdout.js';
 import { HOTBAR, INV_SIZE, SACK_SIZE, ARMOR_SLOTS, countIn, itemName, armorStats, stackMax, fits } from '/shared/items.js';
 import { SKY } from '/shared/skyboss.js';
 import { rayWorld, blocked, bodyHeight, topAt, dirFromAngles } from '/shared/physics.js';
@@ -28,7 +28,8 @@ const r2 = v => Math.round(v * 100) / 100;
 const LANE_NAME = { N: 'NORTH', E: 'EAST', S: 'SOUTH', W: 'WEST' };
 const LANE_POS = Object.fromEntries(OUTPOST.lanes.map(l => [l.id, [(l.zone[0] + l.zone[2]) / 2, (l.zone[1] + l.zone[3]) / 2]]));
 const GLOB_GRAVITY = 12; // matches server/holdout/ai.js
-const PIECE_NAME = { wall: 'WALL', floor: 'FLOOR', ramp: 'STAIR', trap: 'TRAP', deploy: 'DEPLOY' };
+const PIECE_NAME = { wall: 'WALL', floor: 'FLOOR', ramp: 'STAIR', cone: 'CONE', trap: 'TRAP', deploy: 'DEPLOY' };
+const PIECE_KEYS = { bWall: 'wall', bFloor: 'floor', bStair: 'ramp', bCone: 'cone', bTrap: 'trap', bDeploy: 'deploy' }; // action -> BuildMode kind
 const ZINK_TINT = 0x8fc9bf; // Zinkonium's pale blue-green — harvest sparks and bursts
 const SB_HOLDOUT = '<tr><th>PLAYER</th><th>KILLS</th><th>DMG</th><th>BUILDS</th><th>REPAIRED</th><th>REVIVES</th><th>RESCUES</th><th>PING</th></tr>';
 const POWER_BUFF = { p_damage: 'damage', p_rapid: 'rate', p_barrier: 'barrier' };
@@ -95,7 +96,7 @@ export class Holdout {
       phase: 'lobby', wave: 0, waves: WAVES, core: [1, 1], lanes: [], next: [], left: 0, end: 0, diff: welcome.diff || 'normal',
       downed: false, bleedEnd: 0, respawnAt: 0, roster: [], reviveId: null, reviveStart: 0, lastInteract: 0,
       alertUntil: 0, alertText: '', shadowAt: 0, shadowDirty: true, groanAt: 0, dusk: 0, shield: 0, carrying: null,
-      activeThrow: null, payBank: false, using: null, hold: null, holdLock: false, coreHealer: null, buffs: {},
+      activeThrow: null, payBank: false, hold: null, holdLock: false, coreHealer: null, buffs: {},
       task: null, shake: 0, bagAtChest: false, it: null, shopTab: 'shop', buyback: null, bankSel: null,
       teamUps: { vitality: 0, firepower: 0, engineering: 0, gunnery: 0 },
       coreLevel: 0, coreUps: Object.fromEntries(CORE_UP_IDS.map(id => [id, 0])),
@@ -106,19 +107,18 @@ export class Holdout {
     this.minimap = new Minimap(this);
     this.refreshBoxes();
     this.enterDom();
-    game.hud.banner('ZOMBIE HOLDOUT', 'Build, harvest with F, shop at the Core, then press Y when ready', '', 5000);
+    game.hud.banner('ZOMBIE HOLDOUT', `Build, harvest with ${this.keyOr('inspect')}, shop at the Core, then press ${this.keyOr('ready')} when ready`, '', 5000);
   }
 
   get building() { return this.build.active; }
   // run speed on top of the weapon limit: class, Swift Step boots, the Slasher Blade in hand
   get speedMult() {
     const st = this.as ?? (this.as = armorStats(this.armor)), slowed = this.pfx && this.g.now < this.pfx.slowUntil ? 1 - this.pfx.slow : 1;
-    const adren = this.g.now < this.adrenUntil ? ITEMS.adrenaline.speedMult : 1;
-    return (CLASSES[this.cls]?.speed ?? 1) * (1 + st.speed) * (this.g.weapons.w?.speedBuff ?? 1) * slowed * adren;
+    return (CLASSES[this.cls]?.speed ?? 1) * (1 + st.speed) * (this.g.weapons.w?.speedBuff ?? 1) * slowed;
   }
   get rateMult() { return (this.g.now < (this.buffs.rate || 0) ? BUFF.rate : 1) * (1 + 0.06 * (this.teamUps.gunnery || 0)); }
   get reloadMult() { return 1 + 0.1 * (this.teamUps.gunnery || 0); }
-  blocksShooting() { return this.build.active || this.edit.active || this.downed || !!this.carrying || !!this.using; }
+  blocksShooting() { return this.build.active || this.edit.active || this.downed || !!this.carrying; }
   targets() { return this.zombies.targets(); }
   skyTargets() { return this.ents.skyTargets(performance.now() / 1000); }
   balloonTargets() { return this.ents.balloonTargets(); }
@@ -142,9 +142,10 @@ export class Holdout {
   }
 
   placementWorld() {
+    const trapped = [...this.ents.defs.values()].filter(d => d.side === 0).map(d => this.structs.list.get(d.pid)).filter(Boolean);
     return {
       slots: this.structs.slots, pieces: [...this.structs.list.values()].flatMap(p => p.boxes), statics: [...OUTPOST_STATIC, ...this.props.boxes], nodes: this.nodes.boxes,
-      zombies: this.zombies.targets(), eye: this.g.player.eye, mats: this.mats, core: OUTPOST.core, zone: OUTPOST.zone,
+      zombies: this.zombies.targets(), eye: this.g.player.eye, mats: this.mats, core: OUTPOST.core, zone: OUTPOST.zone, trapped: new Set(trapped.map(slotKey)),
     };
   }
 
@@ -176,7 +177,7 @@ export class Holdout {
         if (p) this.pieceGone(p, m.why);
         return;
       }
-      case 'sedit': { const p = this.structs.edit(m.id, m.mask); if (p) { this.pieceSound(p, 'build', 0.4); this.unstick(p.box); } return; }
+      case 'sedit': { const p = this.structs.edit(m.id, m.mask, m.o); if (p) { this.pieceSound(p, 'build', 0.4); this.unstick(p.box); } return; }
       case 'node': if (this.nodes.setHp(m.id, m.hp)) this.refreshBoxes(); return;
       case 'harv': return this.feed(`+${m.n} ${BMATS[m.mat].name.toUpperCase()}${m.weak ? ' · WEAK POINT!' : ''}`, m.mat);
       case 'zsp': for (const z of m.z) this.zombies.spawn(z, now); return;
@@ -273,7 +274,7 @@ export class Holdout {
     this.g.weapons.pool = this.ammo;
     const was = this.downed;
     this.downed = !!m.downed && m.alive;
-    if (this.downed && !was) { this.build.toggle(false); this.edit.stop(); this.using = null; }
+    if (this.downed && !was) { this.build.toggle(false); this.edit.stop(); }
     if (m.carrying !== undefined) this.carrying = m.carrying;
     if (this.activeThrow && !(this.items[this.activeThrow] > 0)) this.activeThrow = null;
     this.activeThrow ??= THROWABLES.find(id => this.items[id] > 0) ?? null;
@@ -293,11 +294,12 @@ export class Holdout {
     return out;
   }
 
-  // key names for hotbar slots 1-6 and the knife, from your bindings
-  hotkeys() {
-    const b = this.g.hud.settings.binds, k = id => keyName(b[id]?.[0]);
-    return [k('primary'), k('secondary'), k('knife'), k('slot4'), k('slot5'), k('slot6'), k('inspect')];
-  }
+  // key name of an action's first binding, for HUD labels and hints
+  key(id) { return keyName(this.g.hud.settings.binds[id]?.[0]); }
+  // same, spelled out for use inside a sentence (key()'s bare '—' reads oddly there)
+  keyOr(id) { const k = this.key(id); return k === '—' ? '(unbound)' : k; }
+  // key names for hotbar slots 1-6 and the harvest tool
+  hotkeys() { return ['primary', 'secondary', 'knife', 'slot4', 'slot5', 'slot6', 'inspect'].map(id => this.key(id)); }
 
   heldItem() { const W = this.g.weapons; return W.slot >= 1 ? this.inv[W.slot - 1] ?? null : null; }
 
@@ -306,11 +308,10 @@ export class Holdout {
     const it = this.heldItem();
     if (!it || it.kind === 'gun') return false;
     if (it.kind === 'throw') { this.activeThrow = it.id; this.throwItem(); }
-    else if (it.kind === 'heal' || it.kind === 'shield') this.heal(it.id);
     else if (it.kind === 'adrenaline') this.useAdrenaline();
     else if (it.kind === 'trap' || it.kind === 'deploy') { this.build.pick[it.kind] = it.id; this.build.select(it.kind); }
     else if (it.kind === 'armor') this.g.net.send({ t: 'move', from: 'i' + (this.g.weapons.slot - 1), to: 'a:' + ARMOR[it.id].slot });
-    else if (it.kind === 'attach') this.say('Open your inventory (E or I) and drop it on a gun to fit it');
+    else if (it.kind === 'attach') this.say(`Open your inventory (${this.key('backpack')}) and drop it on a gun to fit it`);
     return true;
   }
 
@@ -320,7 +321,7 @@ export class Holdout {
     const owned = THROWABLES.filter(id => this.items[id] > 0);
     if (!owned.length) return this.say('No throwables — buy grenades, molotovs or freezes at the Core');
     this.activeThrow = owned[(owned.indexOf(this.activeThrow) + 1) % owned.length];
-    this.say(`T throws: ${ITEMS[this.activeThrow].name} ×${this.items[this.activeThrow]}`, 1.5);
+    this.say(`${this.keyOr('throw')} throws: ${ITEMS[this.activeThrow].name} ×${this.items[this.activeThrow]}`, 1.5);
     this.g.sound.play('tick', { vol: 0.4 });
   }
 
@@ -355,7 +356,7 @@ export class Holdout {
       hud.banner(`WAVE ${m.wave} CLEARED`, `Break: ${Math.round(m.endsIn / 1000)}s · next from ${names(m.next)}`, 'win', 4000);
       this.g.sound.play('win', { vol: 0.5 });
     } else if (m.phase === 'lobby' && (prev === 'victory' || prev === 'defeat')) {
-      hud.banner('MAP RESET', 'New match — press Y when ready', '', 4000); // the stats panel stays up until the next game starts
+      hud.banner('MAP RESET', `New match — press ${this.keyOr('ready')} when ready`, '', 4000); // the stats panel stays up until the next game starts
     }
     if (m.phase === 'countdown') $('hoEnd').hidden = true;
     if (m.phase !== 'wave') this.ents.skyEnd();
@@ -385,7 +386,7 @@ export class Holdout {
     this.build.toggle(false);
     this.edit.stop();
     Object.assign(this, {
-      pfx: null, task: null, buffs: {}, alertUntil: 0, downed: false, carrying: null, using: null, hold: null, holdLock: false,
+      pfx: null, task: null, buffs: {}, alertUntil: 0, downed: false, carrying: null, hold: null, holdLock: false,
       reviveId: null, coreHealer: null, shake: 0, respawnAt: 0, spectate: null, it: null, buyback: null, bankSel: null,
       teamUps: { vitality: 0, firepower: 0, engineering: 0, gunnery: 0 },
       coreLevel: 0, coreUps: Object.fromEntries(CORE_UP_IDS.map(id => [id, 0])),
@@ -530,13 +531,12 @@ export class Holdout {
       this.bleedEnd = this.g.now + m.bleed / 1000;
       this.build.toggle(false);
       this.edit.stop();
-      this.using = null;
       this.g.weapons.cancelReload();
       this.g.weapons.scope = 0;
       this.g.sound.play('downed', { vol: 0.7 });
     } else {
       this.g.remotes.get(m.id)?.setDowned(true);
-      this.g.hud.chat(null, `${this.g.name(m.id)} is down! Hold E next to them to revive`);
+      this.g.hud.chat(null, `${this.g.name(m.id)} is down! Hold ${this.keyOr('interact')} next to them to revive`);
       this.alert(`${this.g.name(m.id).toUpperCase()} IS DOWN`, 2.5);
     }
   }
@@ -560,7 +560,6 @@ export class Holdout {
       this.spectate = null;
       this.build.toggle(false);
       this.edit.stop();
-      this.using = null;
       this.g.weapons.cancelReload();
       this.g.weapons.scope = 0;
       this.g.deathMsg = m.by === 'bleeding out' ? 'You bled out' : `Killed by ${m.by || 'the horde'}`;
@@ -612,13 +611,14 @@ export class Holdout {
   }
 
   // ---------- harvesting (called by the knife) ----------
-  // Returns true when the swing hit a tree/rock/wreck/crate.
+  // Returns true when the swing hit a tree/rock/wreck/crate, a map prop or a built piece (the server decides
+  // whose pieces you may break).
   harvestSwing(eye, dir, reach) {
-    const hit = rayWorld(eye, dir, reach, [...this.nodes.boxes, ...this.props.boxes]);
-    if (hit?.box.prop) {
+    const hit = rayWorld(eye, dir, reach, [...this.nodes.boxes, ...this.props.boxes, ...this.structs.boxes]);
+    if (hit?.box.sid !== undefined) {
       if (this.phase === 'lobby' || this.phase === 'countdown') { this.say('Wait for the game to start before breaking things'); return false; }
       const p = eye.map((v, j) => v + dir[j] * hit.t);
-      this.g.net.send({ t: 'harvest', prop: hit.box.sid });
+      this.g.net.send({ t: 'harvest', sid: hit.box.sid });
       this.g.sound.play('chop_zink', { vol: 0.8, rate: 0.9 + Math.random() * 0.2 });
       this.world.burst(p, hit.n, ZINK_TINT, 6, 2.5);
       return true;
@@ -722,11 +722,11 @@ export class Holdout {
     if (act === 'ready') { this.toggleReady(); return true; }
     if (act === 'backpack') { this.openBag(false); return true; }
     if (act === 'map') { this.minimap.toggle(true); return true; }
-    const needsBody = ['build', 'edit', 'demolish', 'interact', 'throw', 'nextThrow', 'heal', 'slot4', 'slot5', 'slot6', 'adrenaline', 'sack1', 'sack2', 'sack3', 'sack4'];
+    const needsBody = ['edit', 'interact', 'throw', 'nextThrow', 'slot4', 'slot5', 'slot6', 'adrenaline', 'sack1', 'sack2', 'sack3', 'sack4'];
     if (!pl.alive && act === 'fire') { this.cycleSpectate(); return true; }
     if (!pl.alive || this.downed) return needsBody.includes(act) || (this.downed && ['primary', 'secondary', 'knife', 'lastWeapon', 'prevWeapon', 'nextWeapon', 'reload', 'inspect', 'alt', 'jump'].includes(act));
     if (act === 'interact') return this.pressInteract();
-    if (act === 'build') { e.stop(); b.toggle(); return true; }
+    if (PIECE_KEYS[act]) { b.select(PIECE_KEYS[act]); return true; } // no build mode: a piece key builds from anywhere
     if (act === 'edit') { b.toggle(false); e.toggle(); return true; }
     if (act === 'throw') { this.throwItem(); return true; }
     if (act === 'nextThrow') { this.nextThrow(); return true; }
@@ -741,10 +741,8 @@ export class Holdout {
       else this.say('No flashlight on this gun — fit one at the Blacksmith, or find one on a night wave');
       return true;
     }
-    if (act === 'heal') { this.heal(); return true; }
     if (act === 'adrenaline') { this.useAdrenaline(); return true; }
     if (act === 'sack1' || act === 'sack2' || act === 'sack3' || act === 'sack4') { this.useSackSlot(+act.slice(4) - 1); return true; }
-    if (act === 'demolish') { const p = b.aimedPiece(); if (p) g.net.send({ t: 'demolish', id: p.id }); return true; }
     if (e.active) {
       if (act === 'alt') { e.reset(); return true; }
       return ['fire', 'primary', 'secondary', 'knife', 'slot4', 'slot5', 'slot6', 'reload', 'inspect', 'nextWeapon', 'prevWeapon'].includes(act);
@@ -752,23 +750,17 @@ export class Holdout {
     if (b.active) {
       switch (act) {
         case 'fire': b.tryPlace(); return true;
-        case 'bWall': b.select('wall'); return true;
-        case 'bFloor': b.select('floor'); return true;
-        case 'bStair': b.select('ramp'); return true;
-        case 'bTrap': b.select('trap'); return true;
-        case 'bDeploy': b.select('deploy'); return true;
         case 'bRotate': case 'reload': b.rotate(); return true;
         case 'nextWeapon': b.cycle(1); return true;
         case 'prevWeapon': b.cycle(-1); return true;
         case 'alt': { const p = b.aimedPiece(); if (p) g.net.send({ t: 'upgrade', id: p.id }); return true; }
         case 'lastWeapon': b.toggle(false); return true;
-        case 'primary': case 'secondary': case 'knife': case 'slot4': case 'slot5': case 'slot6': case 'inspect': b.toggle(false); break; // a hotbar key drops out of build mode onto that slot
+        case 'primary': case 'secondary': case 'knife': case 'slot4': case 'slot5': case 'slot6': case 'inspect': b.toggle(false); break; // a hotbar key stops building, onto that slot
         default: return false;
       }
     }
     const slot = { primary: 1, secondary: 2, knife: 3, slot4: 4, slot5: 5, slot6: 6, inspect: 0 }[act];
-    if (this.using && slot !== undefined) this.using = null;
-    // hotbar: 1-6 (guns or items), F = harvesting knife (F again while holding it: inspect)
+    // hotbar: 1-6 (guns or items), the harvest tool key = harvesting knife (again while holding it: inspect)
     if (act === 'inspect' && W.slot === W.knifeSlot) { W.inspect(); return true; }
     if (slot !== undefined) { W.equip(slot); return true; }
     if (act === 'fire' && W.w.cat === 'item') return this.useHeld();
@@ -792,108 +784,61 @@ export class Holdout {
     g.vm.knife(false);
   }
 
-  // A survivor right in front of you that could use patching up.
-  survivorToHeal() {
-    const pl = this.g.player, f = dirFromAngles(pl.yaw, 0);
-    let best = null, bd = 2.8;
-    for (const s of this.ents.survivors.values()) {
-      if (s.state === 1 || s.hp >= 0.99) continue;
-      const dx = s.pos[0] - pl.pos[0], dz = s.pos[2] - pl.pos[2], d = Math.hypot(dx, dz);
-      if (d < bd && (dx * f[0] + dz * f[2]) / Math.max(d, 1e-3) > 0.5) { bd = d; best = s; }
-    }
-    return best;
-  }
-
-  // Smart heal: a hurt survivor you face first, then shields when your health is fine, bandages / medkit when it
-  // isn't. Press again to cancel.
-  heal(item = null) {
-    if (this.using && !item) { this.using = null; return; }
-    const hp = this.g.me.hp, sh = this.shield, has = id => this.items[id] > 0;
-    const sv = !item && this.survivorToHeal();
-    if (sv) {
-      const pick = sv.hp < 0.5 && has('medkit') ? 'medkit' : has('bandage') ? 'bandage' : has('medkit') ? 'medkit' : null;
-      if (!pick) return this.say(`${sv.name} is hurt — you need bandages or a medkit`);
-      this.using = { item: pick, start: this.g.now, end: this.g.now + ITEMS[pick].time, sv: sv.id };
-      this.g.weapons.cancelReload();
-      return;
-    }
-    let pick = item;
-    if (!pick) {
-      if (hp < 50 && has('medkit')) pick = 'medkit';
-      else if (hp < 75 && has('bandage')) pick = 'bandage';
-      else if (sh < 50 && has('shield_s')) pick = 'shield_s';
-      else if (sh < 100 && has('shield')) pick = 'shield';
-      else if (hp < 100 && has('medkit')) pick = 'medkit';
-    }
-    if (!pick) return this.say(HEALS.some(has) ? 'Already topped up' : 'No healing items — buy bandages, medkits or shields at the Core');
-    this.using = { item: pick, start: this.g.now, end: this.g.now + ITEMS[pick].time };
-    this.g.weapons.cancelReload();
-  }
-
-  // J (or a sack key on an adrenaline slot): instant, no use-channel.
+  // the adrenaline key, a sack key or LMB with one in hand: instant (the server checks the cooldown).
   useAdrenaline() {
-    if (!(this.items.adrenaline > 0)) return this.say('No adrenaline shots — buy one at the Core or find one on a zombie');
+    if (!(this.items.adrenaline > 0)) return this.say('No adrenaline shots — buy them at the Core or find them on zombies');
     this.g.net.send({ t: 'use', item: 'adrenaline' });
   }
 
-  // Use whatever sits in sack slot `idx` (0-3): heal/shield start the normal timed use, adrenaline is instant.
-  useSackSlot(idx) {
-    const it = this.sack[idx];
-    if (!it) return;
-    if (it.kind === 'adrenaline') { this.g.net.send({ t: 'use', item: 'adrenaline' }); return; }
-    if (it.kind === 'heal' || it.kind === 'shield') {
-      if (this.using) { this.using = null; return; }
-      this.using = { item: it.id, start: this.g.now, end: this.g.now + ITEMS[it.id].time };
-      this.g.weapons.cancelReload();
-    }
-  }
+  // Use whatever sits in sack slot `idx` (0-3) — only Adrenaline Shots go in there.
+  useSackSlot(idx) { if (this.sack[idx]?.kind === 'adrenaline') this.useAdrenaline(); }
 
   // Would a ground item pickup actually go somewhere? Mirrors the server's take(): guns/armor/anything else
   // with a stack size of 1 always succeeds by swapping into your held hotbar slot, so only a full stack of a
   // stackable consumable/trap/deployable can fail (sack full for consumables, then the backpack full too).
   pickupFits(pk) {
     const it = { id: pk.key, kind: pk.ik, n: pk.n, r: pk.r, tier: pk.t, el: pk.el };
+    if (it.kind === 'adrenaline' && this.items.adrenaline >= ADREN_CARRY) return false;
     if (fits(this.inv, this.sack, it)) return true;
     return stackMax(it) === 1 && !this.heldItem()?.locked; // a full inventory swaps with what you hold — never a locked item
   }
 
   // What E would do right now (highest priority first).
   interactTarget() {
-    const g = this.g, pl = g.player, me = pl.pos;
+    const g = this.g, pl = g.player, me = pl.pos, k = this.keyOr('interact');
     if (!pl.alive || this.downed) return null;
     for (const p of this.roster) {
       const r = p.downed && p.id !== g.me.id ? g.remotes.get(p.id) : null;
-      if (r && dist3(r.pos, me) < 2.4) return { kind: 'revive', id: p.id, text: `Hold E to revive ${p.name}`, cont: true };
+      if (r && dist3(r.pos, me) < 2.4) return { kind: 'revive', id: p.id, text: `Hold ${k} to revive ${p.name}`, cont: true };
     }
-    if (this.carrying) return { kind: 'putdown', text: 'Carry them into the ring around the Core · E to put down', press: true };
-    for (const s of this.ents.survivors.values()) if (s.state === 0 && dist3(s.pos, me) < 2.4) return { kind: 'carry', id: s.id, text: `Hold E to pick up ${s.name}`, hold: 1.0 };
-    for (const t of this.ents.thumpers?.values() ?? []) if (t.state === 'idle' && Math.hypot(t.x - me[0], t.z - me[2]) < 2.6) return { kind: 'thump', id: t.id, text: 'Hold E to arm the seismic thumper (taking damage interrupts it)', cont: true };
-    for (const d of this.ents.drops.values()) if (d.landed && Math.hypot(d.x - me[0], d.z - me[2]) < 2.7) return { kind: 'opendrop', id: d.id, text: 'Hold E to open the supply drop', hold: 1.0 };
-    for (const c of this.ents.chests.values()) if (Math.hypot(c.x - me[0], c.z - me[2]) < 2.4) return { kind: 'chest', id: c.id, text: 'Hold E to open the chest', hold: 0.8 };
+    if (this.carrying) return { kind: 'putdown', text: `Carry them into the ring around the Core · ${k} to put down`, press: true };
+    for (const s of this.ents.survivors.values()) if (s.state === 0 && dist3(s.pos, me) < 2.4) return { kind: 'carry', id: s.id, text: `Hold ${k} to pick up ${s.name}`, hold: 1.0 };
+    for (const t of this.ents.thumpers?.values() ?? []) if (t.state === 'idle' && Math.hypot(t.x - me[0], t.z - me[2]) < 2.6) return { kind: 'thump', id: t.id, text: `Hold ${k} to arm the seismic thumper (taking damage interrupts it)`, cont: true };
+    for (const d of this.ents.drops.values()) if (d.landed && Math.hypot(d.x - me[0], d.z - me[2]) < 2.7) return { kind: 'opendrop', id: d.id, text: `Hold ${k} to open the supply drop`, hold: 1.0 };
+    for (const c of this.ents.chests.values()) if (Math.hypot(c.x - me[0], c.z - me[2]) < 2.4) return { kind: 'chest', id: c.id, text: `Hold ${k} to open the chest`, hold: 0.8 };
     const pk = this.ents.nearestPickup(me, 2.3, p => p.kind === 'it' || p.kind === 'svsupply');
     if (pk) {
       const name = pickupName(pk);
       if (pk.kind === 'it' && !this.pickupFits(pk)) return { kind: 'nopickup', text: `Inventory full — can't pick up ${name}` };
-      return { kind: 'pickup', id: pk.id, text: `E: pick up ${name}${pk.ik === 'gun' && this.inv.every(Boolean) ? ' (swaps with what you hold)' : ''}`, press: true };
+      return { kind: 'pickup', id: pk.id, text: `${k}: pick up ${name}${pk.ik === 'gun' && this.inv.every(Boolean) ? ' (swaps with what you hold)' : ''}`, press: true };
     }
-    if (this.smithOn && Math.hypot(SMITH.x - me[0], SMITH.z - me[2]) < SMITH.reach) return { kind: 'smith', text: 'E: talk to the Blacksmith (forge, infuse, attachments, turrets)', press: true };
-    if (this.nearBanker()) return { kind: 'bank', text: 'E — talk to the Banker', press: true };
-    if (this.nearStash()) return { kind: 'stash', text: 'E: open the team chest', press: true };
+    if (this.smithOn && Math.hypot(SMITH.x - me[0], SMITH.z - me[2]) < SMITH.reach) return { kind: 'smith', text: `${k}: talk to the Blacksmith (forge, infuse, attachments, turrets)`, press: true };
+    if (this.nearBanker()) return { kind: 'bank', text: `${k} — talk to the Banker`, press: true };
+    if (this.nearStash()) return { kind: 'stash', text: `${k}: open the team chest`, press: true };
     if (distToBox(pl.eye, OUTPOST.core.base) < 3.0 && this.core[0] < this.core[1]) {
       if (this.phase === 'wave') return { kind: 'coreheal', text: 'The Core can only be repaired between waves' };
       const other = this.coreHealer && this.coreHealer !== g.me.id ? this.roster.find(p => p.id === this.coreHealer) : null;
-      return { kind: 'coreheal', text: other ? `${other.name} is healing the Core (one at a time)` : 'Hold E to heal the Core', cont: !other };
+      return { kind: 'coreheal', text: other ? `${other.name} is healing the Core (one at a time)` : `Hold ${k} to heal the Core`, cont: !other };
     }
     const piece = this.build.aimedPiece();
-    if (piece && piece.hp + piece.grow < piece.maxHp - 1) return { kind: 'repair', id: piece.id, text: `Hold E to repair ${BMATS[piece.mat].name.toLowerCase()} ${piece.kind} (${Math.round(piece.hp)}/${piece.maxHp})`, cont: true };
+    if (piece && piece.hp + piece.grow < piece.maxHp - 1) return { kind: 'repair', id: piece.id, text: `Hold ${k} to repair ${BMATS[piece.mat].name.toLowerCase()} ${piece.kind} (${Math.round(piece.hp)}/${piece.maxHp})`, cont: true };
     return null;
   }
 
   pressInteract() {
     const it = this.interactTarget(), g = this.g;
-    if (!it) { this.openBag(false); return true; } // nothing to use/pick up/revive/repair here — open the inventory instead
-    if (it.kind === 'nopickup') { this.say(it.text); return true; } // wouldn't fit — flash why, don't open the inventory
-    if (!it.press) return false;
+    if (it?.kind === 'nopickup') { this.say(it.text); return true; } // wouldn't fit — flash why
+    if (!it?.press) return false;
     if (it.kind === 'pickup') g.net.send({ t: 'pickup', id: it.id, slot: Math.max(0, g.weapons.slot - 1) });
     else if (it.kind === 'putdown') g.net.send({ t: 'carry' });
     else if (it.kind === 'stash') this.openBag(true);
@@ -905,7 +850,7 @@ export class Holdout {
   // holds: revive / heal Core / repair send while held; carry / open need a full hold
   interact() {
     const g = this.g, now = g.now, it = this.it = this.interactTarget();
-    const holding = g.held('interact') && !g.ui && g.input.locked && !this.build.active; // E is a stair key in build mode
+    const holding = g.held('interact') && !g.ui && g.input.locked;
     if (!holding) this.holdLock = false;
     this.reviveId = null;
     this.thumpId = null;
@@ -940,6 +885,7 @@ export class Holdout {
     this.bagAtChest = atChest || this.nearStash();
     g.ui = 'bag';
     $('bagMenu').hidden = false;
+    $('bagKey').textContent = this.key('backpack');
     this.renderBag();
     if (g.input.locked) g.setVCursor(innerWidth / 2, innerHeight / 2);
   }
@@ -962,6 +908,7 @@ export class Holdout {
     if (g.ui || !g.player.alive) return;
     g.ui = 'smith';
     $('smithMenu').hidden = false;
+    $('smithKey').textContent = this.key('interact');
     this.renderSmith();
     if (g.input.locked) g.setVCursor(innerWidth / 2, innerHeight / 2);
   }
@@ -994,6 +941,7 @@ export class Holdout {
     g.ui = 'bank';
     this.bankSel = null;
     $('bankMenu').hidden = false;
+    $('bankKey').textContent = this.key('interact');
     this.renderBank();
     if (g.input.locked) g.setVCursor(innerWidth / 2, innerHeight / 2);
   }
@@ -1068,10 +1016,6 @@ export class Holdout {
     this.build.update(dt, firing);
     this.edit.update(dt, firing);
     this.interact();
-    if (this.using) {
-      if (!g.player.alive || this.downed) this.using = null;
-      else if (now >= this.using.end) { g.net.send({ t: 'use', item: this.using.item, sv: this.using.sv }); g.sound.play('heal_done', { vol: 0.6 }); this.using = null; }
-    }
     this.dusk += ((this.phase === 'wave' ? 1 : 0) - this.dusk) * Math.min(1, dt * 0.7);
     this.world.setDusk(Math.round(this.dusk * 50) / 50);
     const wasNight = this.nightK > 0.3;
@@ -1166,8 +1110,8 @@ export class Holdout {
       const who = this.spectate && this.roster.find(p => p.id === this.spectate);
       return `${g.deathMsg} — you're out until wave ${this.wave} is cleared${who ? ` · watching ${who.name} (click to switch)` : ''}`;
     }
-    if (this.downed) return `DOWNED — bleeding out in ${Math.max(0, Math.ceil(this.bleedEnd - now))}s · a teammate can hold E to revive you`;
-    if (this.edit.active) return `EDIT (${this.edit.describe()}) · drag tiles, release to apply · V done · right-click reset`;
+    if (this.downed) return `DOWNED — bleeding out in ${Math.max(0, Math.ceil(this.bleedEnd - now))}s · a teammate can hold ${this.keyOr('interact')} to revive you`;
+    if (this.edit.active) return `EDIT (${this.edit.describe()}) · drag tiles, release to apply · ${this.keyOr('edit')} done · right-click reset`;
     const b = this.build;
     if (b.active) {
       const p = b.aimedPiece();
@@ -1175,12 +1119,11 @@ export class Holdout {
       const look = p && !b.placing ? ` · aiming at ${BMATS[p.mat].name.toLowerCase()} ${p.kind} ${Math.round(p.hp)}/${p.maxHp}` : '';
       return `${status}${look}`;
     }
-    if (this.using) return `Using ${ITEMS[this.using.item].name}… (H to cancel)`;
     if (this.it) return this.it.text;
-    if ((this.phase === 'lobby' || this.phase === 'countdown') && !this.cls) return 'Pick a class: press B at the Core (Tank · Assault · Medic) · then Y when ready';
-    if (this.phase === 'lobby' || this.phase === 'countdown') return `Waiting for the squad — press Y when ready · building and harvesting open when the game starts${this.canBuy() ? ' · B shop' : ''}`;
-    if (this.phase === 'prep') return `Get ready: G build · F harvest · B shop at the Core · Y to start wave 1 early`;
-    if (this.phase === 'intermission') return `Rebuild, repair and restock · Y to skip the break${this.canBuy() ? ' · B to shop' : ''}`;
+    if ((this.phase === 'lobby' || this.phase === 'countdown') && !this.cls) return `Pick a class: press ${this.keyOr('buy')} at the Core (Tank · Assault · Medic) · then ${this.keyOr('ready')} when ready`;
+    if (this.phase === 'lobby' || this.phase === 'countdown') return `Waiting for the squad — press ${this.keyOr('ready')} when ready · building and harvesting open when the game starts${this.canBuy() ? ` · ${this.keyOr('buy')} shop` : ''}`;
+    if (this.phase === 'prep') return `Get ready: build with ${['bWall', 'bFloor', 'bStair', 'bCone'].map(id => this.key(id)).join(' ')} · ${this.keyOr('inspect')} harvest · ${this.keyOr('buy')} shop at the Core · ${this.keyOr('ready')} to start wave 1 early`;
+    if (this.phase === 'intermission') return `Rebuild, repair and restock · ${this.keyOr('ready')} to skip the break${this.canBuy() ? ` · ${this.keyOr('buy')} to shop` : ''}`;
     return '';
   }
 
@@ -1188,7 +1131,7 @@ export class Holdout {
     const g = this.g, now = g.now, ph = this.phase;
     const n = this.roster.length || 1, ready = this.roster.filter(p => p.ready).length;
     const title = { lobby: 'LOBBY', countdown: 'GET READY', prep: 'PREPARE', victory: 'VICTORY', defeat: 'DEFEAT' }[ph] ?? `WAVE ${this.wave}`;
-    const sub = ph === 'lobby' ? `${ready}/${n} ready · press Y` : ph === 'intermission' || ph === 'prep' ? `break · ${ready}/${n} ready` : ph === 'wave' ? `${n} player${n > 1 ? 's' : ''}` : '';
+    const sub = ph === 'lobby' ? `${ready}/${n} ready · press ${this.keyOr('ready')}` : ph === 'intermission' || ph === 'prep' ? `break · ${ready}/${n} ready` : ph === 'wave' ? `${n} player${n > 1 ? 's' : ''}` : '';
     setText('hoWaveNo', title);
     setText('hoWaveSub', sub.toUpperCase());
     const [c, cm] = this.core, frac = Math.max(0, Math.min(1, c / cm)), barrier = now < (this.buffs.barrier || 0);
@@ -1206,11 +1149,11 @@ export class Holdout {
     setHTML('hotbar', hotbarHTML(this));
     const flash = this.hasFlashlight();
     setHidden('hoFlash', !flash);
-    if (flash) { setText('hoFlash', `FLASHLIGHT ${this.flashOn ? 'ON' : 'OFF'} · L`); setClass('hoFlash', 'on', this.flashOn); }
+    if (flash) { setText('hoFlash', `FLASHLIGHT ${this.flashOn ? 'ON' : 'OFF'} · ${this.key('flashlight')}`); setClass('hoFlash', 'on', this.flashOn); }
     const nvg = this.armor.head?.id === 'nvg';
     setHidden('hoNV', !nvg);
     if (nvg) {
-      const label = this.nvK > 0.5 ? 'NIGHT VISION ON · L' : this.nvUp ? 'NIGHT VISION UP · L' : 'NIGHT VISION (switches on at night) · L';
+      const fk = this.key('flashlight'), label = this.nvK > 0.5 ? `NIGHT VISION ON · ${fk}` : this.nvUp ? `NIGHT VISION UP · ${fk}` : `NIGHT VISION (switches on at night) · ${fk}`;
       setText('hoNV', label);
       setClass('hoNV', 'on', this.nvK > 0.5);
     }
@@ -1252,16 +1195,15 @@ export class Holdout {
     setHidden('buildBar', !b.active);
     if (b.active) {
       const binds = g.hud.settings.binds, k = id => keyName(binds[id]?.[0]);
-      setHTML('buildBar', [['wall', 'bWall'], ['floor', 'bFloor'], ['ramp', 'bStair'], ['trap', 'bTrap'], ['deploy', 'bDeploy']].map(([k2, id]) => `<span class="${b.kind === k2 ? 'on' : ''}"><b>${k(id)}</b>${PIECE_NAME[k2]}</span>`).join('') +
+      setHTML('buildBar', Object.entries(PIECE_KEYS).map(([id, k2]) => `<span class="${b.kind === k2 ? 'on' : ''}"><b>${k(id)}</b>${PIECE_NAME[k2]}</span>`).join('') +
         (b.placing ? `<span class="on"><b>⟳</b>${esc(ITEMS[b.item]?.name ?? 'NONE')} ×${this.items[b.item] || 0}</span>` : `<span class="mat ${b.mat} on">${BMATS[b.mat].name.toUpperCase()} ${this.mats[b.mat]}</span>`) +
-        `<small>LMB place (hold) · ${k('bRotate')} rotate stair${b.placing ? ' · wheel type' : ''} · X demolish · V edit · G exit</small>`);
+        `<small>LMB place (hold) · ${k('bRotate')} rotate stair${b.placing ? ' · wheel type' : ''} · ${k('edit')} edit · hotbar keys: weapons</small>`);
     }
-    // progress ring: reviving, holding E, using an item, or bleeding out
+    // progress ring: reviving, holding E, or bleeding out
     let ring = null;
     if (this.reviveId) ring = [Math.min(1, (now - this.reviveStart) / (CLASSES[this.cls]?.revive ? 1.5 : 3)), `REVIVING ${g.name(this.reviveId).toUpperCase()}`, 'var(--accent2)'];
     else if (this.thumpId !== null && this.thumpId !== undefined) ring = [Math.min(1, (now - this.reviveStart) / 5), 'ARMING THUMPER', '#5dff7a'];
     else if (this.hold) ring = [Math.min(1, (now - this.hold.start) / this.hold.it.hold), this.hold.it.kind === 'carry' ? 'PICKING UP' : 'OPENING', 'var(--gold)'];
-    else if (this.using) ring = [(now - this.using.start) / (this.using.end - this.using.start), ITEMS[this.using.item].name.toUpperCase(), '#7fd0ff'];
     else if (this.downed) ring = [Math.max(0, (this.bleedEnd - now) / 30), 'DOWNED', 'var(--accent)'];
     setHidden('revive', !ring);
     if (ring) {

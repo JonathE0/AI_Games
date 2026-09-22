@@ -47,6 +47,7 @@ export class Minimap {
       if (g.ui) return;
       g.ui = 'map';
       $('mapWrap').hidden = false;
+      $('mapKey').textContent = this.h.key('map');
       const r = this.big.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio || 1);
       this.big.width = Math.round(r.width * dpr);
       this.big.height = Math.round(r.height * dpr);

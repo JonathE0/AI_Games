@@ -1,6 +1,6 @@
 // Holdout inventory rules shared by server and browser: the Minecraft-style grid (6 hotbar + 18 backpack
 // slots, 4 armor slots), what stacks, gun tiers on top of rarity, attachments and the armor catalog.
-// Items: { uid, id, kind: 'gun' | 'throw' | 'heal' | 'shield' | 'trap' | 'deploy' | 'armor' | 'attach',
+// Items: { uid, id, kind: 'gun' | 'throw' | 'adrenaline' | 'trap' | 'deploy' | 'armor' | 'attach',
 //          n (stack size), r (gun rarity), tier (1-3, guns and armor), el (gun element), att (gun attachments) }
 import { WEAPONS } from './weapons.js';
 import { ITEMS, RARITY, ARMOR, ATTACH } from './holdout.js';
@@ -9,8 +9,8 @@ import { ELEMENTS } from './elements.js';
 
 export const HOTBAR = 6, BACKPACK = 18, INV_SIZE = HOTBAR + BACKPACK, STASH_SIZE = 18;
 export const ARMOR_SLOTS = ['head', 'chest', 'legs', 'feet'];
-export const SACK_SIZE = 4; // a small pouch of consumables (heal / shield / adrenaline) everyone always carries
-export const CONSUMABLE_KINDS = ['heal', 'shield', 'adrenaline'];
+export const SACK_SIZE = 4; // a small pouch of consumables (Adrenaline Shots) everyone always carries
+export const CONSUMABLE_KINDS = ['adrenaline'];
 export const isConsumable = it => !!it && CONSUMABLE_KINDS.includes(it.kind);
 
 // Tier upgrades sit on top of rarity: the damage multiplier stacks with the rarity one.

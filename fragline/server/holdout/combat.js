@@ -146,7 +146,6 @@ export class Combat {
         const d = Math.hypot(z.pos[0] - p[0], z.pos[2] - p[2]);
         room.damageZombie(z, it.dmg * (1 - (0.6 * d) / it.radius) * (room.buffActive('damage') ? 1.3 : 1), pr.owner, 'grenade');
       }
-      room.damageProps(p, it.radius, it.dmg * 0.8);
       room.bosses.blastMaw(p, it.radius, it.dmg, pr.owner);
     } else if (pr.kind === 'rocket' || pr.kind === 'glnade') {
       for (const z of inRange(pr.splash)) {
@@ -154,7 +153,6 @@ export class Combat {
         room.damageZombie(z, dmg, pr.owner, pr.kind === 'glnade' ? 'gl' : 'rocket');
         if (pr.el && !z.dead) room.applyElement(z, pr.el, dmg, pr.owner);
       }
-      room.damageProps(p, pr.splash, pr.dmg * 0.8);
       room.bosses.blastMaw(p, pr.splash, pr.dmg, pr.owner);
       if (pr.bomblets) this.spawnBomblets(p, pr, now);
     } else if (pr.kind === 'molotov') {

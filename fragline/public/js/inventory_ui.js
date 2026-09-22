@@ -1,4 +1,4 @@
-// Zombie Holdout inventory window (E or I): a Minecraft-style grid — armor slots beside a figure with your stats,
+// Zombie Holdout inventory window (the backpack key, I by default): a Minecraft-style grid — armor slots beside a figure with your stats,
 // the 18-slot backpack, the 6-slot hotbar, ammo / material counters and (at the Core's team chest) the
 // shared chest grid. Drag items between slots with the in-game cursor (or the real mouse when it is free),
 // drop them outside the window to throw them on the ground, shift-click to quick-move. The server checks
@@ -8,7 +8,7 @@ import { AMMO, AMMO_IDS, ITEMS, ARMOR, ATTACH, CLASSES, ammoCap } from '/shared/
 import { ELEMENTS } from '/shared/elements.js';
 import { HOTBAR, INV_SIZE, STASH_SIZE, SACK_SIZE, ARMOR_SLOTS, TIERS, TIER_COLORS, magFor, gunMult, itemName, armorStats, damageReduction, tierCost } from '/shared/items.js';
 import { BMATS, MAT_IDS } from '/shared/build.js';
-import { itemLook, slotHTML } from './holdout_ui.js';
+import { itemLook, slotHTML, itemDesc } from './holdout_ui.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
@@ -50,7 +50,7 @@ export class InventoryUI {
     return ref[0] === 'i' ? h.inv[n] ?? null : ref[0] === 's' ? h.stash.items?.[n] ?? null : ref[0] === 'k' ? h.sack[n] ?? null : null;
   }
 
-  slot(ref, it, extra = '') { return slotHTML(ref, it, this.sel === ref, extra); }
+  slot(ref, it, extra = '') { return slotHTML(ref, it, this.sel === ref, extra, this.h.key('flashlight')); }
 
   // ---------- drawing ----------
   render() {
@@ -67,7 +67,7 @@ export class InventoryUI {
     const grid = (from, to, prefix, items) => Array.from({ length: to - from }, (_, k) => this.slot(prefix + (from + k), items[from + k])).join('');
     const keys = h.hotkeys();
     const hot = Array.from({ length: HOTBAR }, (_, k) => this.slot('i' + k, h.inv[k], `<b class="key">${keys[k]}</b>`)).join('');
-    const sackKeys = ['7', '8', '9', '0'];
+    const sackKeys = [1, 2, 3, 4].map(i => h.key('sack' + i));
     const sack = Array.from({ length: SACK_SIZE }, (_, k) => this.slot('k' + k, h.sack[k], `<b class="key">${sackKeys[k]}</b>`)).join('');
     const counters = [
       ...AMMO_IDS.map(t => `<span class="chip" style="--c:${AMMO[t].color}">${AMMO[t].name.replace(' Ammo', '')} <b>${h.ammo[t] || 0}</b><small>/${ammoCap(t, h.cls)}</small></span>`),
@@ -91,7 +91,7 @@ export class InventoryUI {
         <h3>SACK</h3><div class="grid sack">${sack}</div><div class="counters">${counters}</div></div>
       ${chest}</div>
       <div class="invInfo" id="invInfo">${this.infoHTML()}</div>
-      <small class="invHelp">Drag to move · drop outside the window to throw it away · shift-click to quick-move · drop an attachment on a gun to fit it · hover a tile and press L to lock/unlock it</small>`;
+      <small class="invHelp">Drag to move · drop outside the window to throw it away · shift-click to quick-move · drop an attachment on a gun to fit it · hover a tile and press ${h.key('flashlight')} to lock/unlock it</small>`;
     this.wire();
     if (this.g.vcur) this.g.setVCursor(...this.g.vcur);
   }
@@ -119,10 +119,10 @@ export class InventoryUI {
       parts.push(ATTACH[it.id].desc + ' · drop it on a gun to fit it');
       acts.push(btn('Fit on the gun in hand', { act: 'fit' }));
     } else {
-      const d = ITEMS[it.id];
-      parts.push(d.kind === 'heal' ? `+${d.hp}% HP up to ${d.cap}% · ${d.time}s` : d.kind === 'shield' ? `+${d.sh} shield up to ${d.cap}` : d.kind === 'throw' ? 'Throw with T (N picks which)' : 'Place it from build mode');
-      if (d.kind === 'heal' || d.kind === 'shield') acts.push(btn('Use', { act: 'use' }));
-      if (d.kind === 'throw') acts.push(btn(h.activeThrow === it.id ? 'Selected for T' : 'Select for T', { act: 'select' }, h.activeThrow === it.id ? 'on' : ''));
+      const d = ITEMS[it.id], throwKey = h.key('throw');
+      parts.push(d.kind === 'adrenaline' ? itemDesc(it.id, throwKey) : d.kind === 'throw' ? `Throw with ${throwKey} (${h.key('nextThrow')} picks which)` : `Place it with ${h.key(d.kind === 'trap' ? 'bTrap' : 'bDeploy')}`);
+      if (d.kind === 'adrenaline') acts.push(btn('Use', { act: 'use' }));
+      if (d.kind === 'throw') acts.push(btn(h.activeThrow === it.id ? `Selected for ${throwKey}` : `Select for ${throwKey}`, { act: 'select' }, h.activeThrow === it.id ? 'on' : ''));
     }
     if ((it.kind === 'gun' || it.kind === 'armor') && (it.tier ?? 1) < 3) {
       const to = (it.tier ?? 1) + 1, c = tierCost(it, to);
@@ -130,7 +130,7 @@ export class InventoryUI {
       else acts.push(`<span class="muted">Tier III: the Blacksmith</span>`);
     }
     if (!ref.startsWith('s')) acts.push(btn((it.n ?? 1) > 1 ? 'Drop 1' : 'Drop', { act: 'drop1' }, '', it.locked), (it.n ?? 1) > 1 ? btn('Drop all', { act: 'drop' }, '', it.locked) : '');
-    if (it.locked) parts.push('<span class="muted">Locked — press L to unlock</span>');
+    if (it.locked) parts.push(`<span class="muted">Locked — press ${h.key('flashlight')} to unlock</span>`);
     return `<div>${parts.join('<br>')}</div><div class="acts">${acts.join('')}</div>`;
   }
 
@@ -139,7 +139,7 @@ export class InventoryUI {
       b.onclick = () => {
         const d = b.dataset, net = this.g.net, it = this.sel && this.item(this.sel);
         if (d.op) net.send({ t: 'stash', op: d.op, cat: d.cat, key: d.key, n: +d.n });
-        else if (d.act === 'use') { this.h.closeBag(); this.h.heal(it.id); }
+        else if (d.act === 'use') { this.h.closeBag(); this.h.useAdrenaline(); }
         else if (d.act === 'select') { this.h.activeThrow = it.id; this.render(); }
         else if (d.act === 'wear') net.send({ t: 'move', from: this.sel, to: 'a:' + ARMOR[it.id].slot });
         else if (d.act === 'unwear') { const free = this.h.inv.findIndex((x, i) => !x && i >= HOTBAR); if (free >= 0) net.send({ t: 'move', from: this.sel, to: 'i' + free }); }

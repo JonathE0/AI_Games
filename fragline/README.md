@@ -52,14 +52,14 @@ variables. Play and Join then use that server instead of solo mode.
 | Key | Action |
 | --- | --- |
 | WASD | Move (release/tap the opposite key to counter-strafe) |
-| Shift | Walk — silent footsteps, better accuracy |
-| Ctrl or C | Crouch (crouch in the air to crouch-jump) |
+| Ctrl | Crouch (crouch in the air to crouch-jump) |
 | Space | Jump |
 | Left click | Fire / knife slash |
 | Right click | Scope (AWP/SSG, 2 zoom levels) / knife stab |
 | R | Reload |
 | 1–6, mouse wheel | Hotbar slots (guns or items), cycle |
-| F | Harvesting knife · press again to inspect it (the karambit twirls around its ring) |
+| X | Harvest tool (the harvesting knife) · press again to inspect it (the karambit twirls around its ring) |
+| Q · F · C · Shift | Build a wall · floor · stair · cone — from anywhere, no build mode (**Z** trap, **V** turret / Rally Fire, **G** edit) |
 | B | Shop — inside the ring around the Core |
 | Tab | Scoreboard |
 | Enter | Chat |
@@ -67,7 +67,9 @@ variables. Play and Join then use that server instead of solo mode.
 
 Every action (including fire/scope) can be rebound in **Settings → Key bindings**: two slots per action,
 keyboard keys, mouse buttons (incl. side buttons) or the scroll wheel — e.g. bind jump to *Wheel down* for
-scroll-bhopping. Sensitivity uses the CS2 scale (`0.022°` per mouse count). From Valorant, multiply your sens by 3.18.
+scroll-bhopping. **Right handed** (the defaults above) and **Left handed** load a full preset — left-handed puts
+the mouse in your left hand and moves on **O K L ;** with the hotbar on **- 0 9 8 7 6** and the inventory on
+**Enter**. Sensitivity uses the CS2 scale (`0.022°` per mouse count). From Valorant, multiply your sens by 3.18.
 
 **Esc works like CS** in Chrome/Edge: matches run fullscreen with Keyboard Lock, so Esc closes the shop
 (which uses an in-game cursor — your mouse never unlocks) or opens/closes the pause menu. Hold Esc to leave
@@ -101,7 +103,7 @@ of purple storm gates on the north/east/south/west edges, and you build, harvest
   | --- | --- |
   | Tank | 300 HP, a bit slower, takes 15 % less damage, immune to knockback/stuns from zombies, builds & repairs 25 % faster |
   | Assault | 200 HP, +20 % damage, 50 % bigger magazines, carries 50 % more ammo, 10 % faster, +15 % fire rate for 3 s after a kill |
-  | Medic | 200 HP, regenerates, heals teammates and survivors within 5 m, revives twice as fast, healing items 25 % stronger, a free medkit every 2 waves, regens shield near the Core |
+  | Medic | 200 HP, regenerates, heals teammates and survivors within 5 m, revives twice as fast, Adrenaline Shots 25 % stronger, 3 free Adrenaline Shots every 2 waves, regens shield near the Core |
 
 - **Zombies:** Shambler, Runner, Spitter (lobs acid over walls), Brute (armored wall-breaker), plus:
   Stalker (small, fast, rapid swings — from wave 4), Sniper (camps near its gate, laser telegraph, hits
@@ -146,15 +148,17 @@ of purple storm gates on the north/east/south/west edges, and you build, harvest
   on by itself in the dark, works on any wave; **L** toggles it). Zombies drop flashlights on night waves.
   **Night Vision Goggles** (head armor) switch the view to a bright green night-vision image when it gets dark
   (**L** flips them up when your gun has no flashlight).
-- **Inventory (I):** Minecraft-style — 6 hotbar slots (**1–6**, **F** = harvesting knife) + 18 backpack slots
+- **Inventory (I):** Minecraft-style — 6 hotbar slots (**1–6**, **X** = harvesting knife) + 18 backpack slots
   + 4 armor slots (head / chest / legs / feet). Drag and drop to rearrange, shift-click to quick-move, drag an
   item outside the panel to drop it, or hover an item and press **1–6** to swap it into that hotbar slot.
-  A separate 4-slot **sack** always rides along for consumables (**7 8 9 0** use them): bandages, medkits, shields
-  and **Adrenaline Shots** (**J**) — an adrenaline shot heals instantly (overflow becomes shield) and gives you
-  8 s of regeneration plus a damage and speed boost. Ammo and materials are counters. Next to the team chest the chest opens
+  A separate 4-slot **sack** always rides along for **Adrenaline Shots** (**H**, or **7 8 9 0** per sack slot), the
+  only carried heal: +25 HP and +25 shield at once, then +4 HP/s for 5 s (stacks of 10, 1.5 s cooldown). About one
+  kill in eight drops one, Brutes, Wardens and Golems always drop 1-3, and chests, supply drops and bosses carry
+  stacks. Otherwise you heal at Rally Fires, near a Medic, or by resting inside the Core ring (+2 HP/s once you've
+  gone 4 s without being hit). Ammo and materials are counters. Next to the team chest the chest opens
   beside it. Anything in the hotbar is usable: guns shoot, throwables throw on click (**T** quick-throws, **N**
-  picks which), heals are held, traps and turrets open build mode. **E** picks things up, and opens the inventory
-  when there's nothing to interact with. There's no drop key: drag an item out of the window to throw it away, or
+  picks which), Adrenaline Shots are used on click, traps and turrets start placing them. **E** picks things up; only the
+  inventory key opens and closes the inventory. There's no drop key: drag an item out of the window to throw it away, or
   sell it to the Banker. Every gun shows its own icon in the tiles and its own silhouette when it's on the ground,
   with a name label as you get close.
 - **Guns:** Fortnite-style pistols, SMGs, ARs, shotguns, a Hand Cannon, rockets, the SSG 08 and AWP, plus the
@@ -175,12 +179,18 @@ of purple storm gates on the north/east/south/west edges, and you build, harvest
   armor, element infusion, attachments (Extended Mag, Compensator, Flashlight, Laser Sight) and turret upgrades
   (damage, range, fire rate, ammo refill, incendiary / frost rounds, armor plate — stand near the turret).
   Forging tier III and infusing an element cost money plus **Zinkonium**.
-- **Building (G):** walls, floors and stairs on a 4 m grid with their own keys while build mode is on —
-  **Q** wall · **E** stair · **F** floor · **T** trap · **Z** turret / Rally Fire · **R** rotate the stair (it
-  always rises away from you) · wheel cycles the selected trap/turret. LMB place (hold to turbo-build),
-  **X** demolish your own piece, hold **E** to repair. Rebind them in Settings → Key bindings → *Building*.
+- **Building (Fortnite Builder Pro — no build mode):** walls, floors, stairs and cones on a 4 m grid, each on
+  its own key that starts building it from anywhere — **Q** wall · **F** floor · **C** stair · **Shift** cone ·
+  **Z** trap · **V** turret / Rally Fire · **R** rotate the stair while building (it always rises away from you)
+  · wheel cycles the selected trap/turret. LMB place (hold to turbo-build), hold **E** to repair; a hotbar key
+  (**1–6**, **X**) goes back to your weapons. No key does two things except rotate, which shares **R** with
+  reload. Rebind them in Settings → Key bindings → *Building*; older saved binds reset once to the right-handed preset.
+  **Cones** are Fortnite roofs: a 1.2 m pyramid over a tile, on the same plane as a floor (look up to roof your
+  cell, down to cone your feet) — walkable, and they can cover a turret or Rally Fire, but not a floor trap.
   Everything is built from **Zinkonium** — one tough material, no upgrading a piece to something better.
-  Pieces grow to full HP over 4 s and shrug off most rifle fire.
+  Pieces grow to full HP over 4 s; guns and your explosives don't hurt them. Break down a piece you built
+  with the knife (3 hits on a full Zinkonium piece, 5 Zinkonium back when it falls); a teammate's pieces
+  are theirs to break unless they've left.
   Stairs are Fortnite-style ramps: a thin sloped slab you can run up, walk and shoot underneath, and see from
   below. Floors sit flush with each level, so stairs run straight onto the floor above and doors on a floor
   are tall enough to walk through. **Structural integrity:** anything that loses its connection to the ground collapses.
@@ -189,17 +199,23 @@ of purple storm gates on the north/east/south/west edges, and you build, harvest
 - **The map is a ruin:** collapsed apartment blocks, a burnt-out gas station, a crashed bus and a leaning
   watchtower sit in the four quarters, wrapped in vines, rubble, dead scrub and scattered wreckage. They are
   cover, harvestable material and landmarks — and there are chests and survivor shelters tucked inside them.
-- **Everything breaks except the Core:** houses, walls, roofs, crates, shacks and ruins have HP; zombies,
-  explosives and bullets wear them down, and your knife harvests them for materials.
+- **Everything breaks except the Core:** houses, walls, roofs, crates, shacks and ruins have HP; zombies
+  wear them down (guns and your explosives don't), and your knife harvests them for materials.
 - **Funnels:** zombies weigh a detour against smashing through. Leave one opening and make it a killbox.
 - **Harvesting:** your knife chops trees, rocks, wrecked cars and map props for **Zinkonium** — the one
   building material. Hit the glowing weak point for 2.5× materials.
-- **Edits (V):** hold the fire button and drag over the tiles you want gone — **letting go of the mouse applies
-  the edit straight away**, no second key press. Walls are a 3×3 grid (bottom middle two = a **door**, single tiles = **windows**), floors 2×2,
-  stairs split into halves. **Ladders** on every face of the Core lead to its roof.
+- **Edits (G), Fortnite-style:** hold the fire button and drag over the tiles you want gone — **letting go of the
+  mouse applies the edit straight away**, no second key press. Walls are a 3×3 grid and only Fortnite's shapes
+  count: **windows** (a middle-row tile, or both sides), **doors** (middle + bottom tile of a column — zombies still
+  have to break them), a door with a window on the far side, the curved **arch** (bottom row + centre), **half
+  arches** (a bottom corner 2×2 — open, rounded toward the middle), **triangles** (a corner tile and its two
+  neighbours) and medium / low walls (top row / top two rows, a door fits under a medium wall). Anything else
+  flashes red and resets. Floors and cones are 2×2 (take out 1–3 quarters). Stairs: drag across all four tiles
+  to turn them, or over two side by side for a half stair rising that way. **Ladders** on every face of the Core
+  lead to its roof.
 - **Shop (B, inside the ring around the Core — the ring is wide now):** one page with everything to buy —
   guns (each also as a fire / water / ice / shock version), ammo, grenades / molotovs / freeze grenades,
-  bandages / medkits / shield potions, **Adrenaline Shots**, floor spikes, wall darts, flame grills,
+  **Adrenaline Shots**, floor spikes, wall darts, flame grills,
   auto turret $1800, rocket turret $3000, **Rally Fire** (heals health and recharges shields) and armor.
   Duplicates are fine — buy a second SMG whenever you like. Three more tabs:
   **Upgrades** (your guns: rarity up to Legendary, tier II), **Team** (timed powerups plus permanent 5-level team
@@ -233,7 +249,7 @@ of purple storm gates on the north/east/south/west edges, and you build, harvest
   people around it, light gun) or a **Ranger** (rifle, best damage, stays back), and their tier — Recruit, Guard,
   Soldier, Marksman — sets how good their gun is. They look after themselves: they keep firing while backing away
   from anything that gets close, never stray far from the Core, and fall back when hurt. They heal very slowly on
-  their own (a bandage, medkit, Medic or Rally Fire patches them faster) and die for good.
+  their own (a Medic or a Rally Fire patches them faster) and die for good.
 
 Tuning lives in `shared/zombies.js` (types, bosses, scaling, night, drops), `shared/holdout.js` (items,
 armor, attachments, classes, the Blacksmith, loot, survivors, breaks), `shared/items.js` (inventory, tiers),
