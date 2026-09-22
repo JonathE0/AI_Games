@@ -1,0 +1,9 @@
+# Render Blueprint: the co-op multiplayer server (serves the game too). New -> Blueprint -> pick this repo.
+services:
+  - type: web
+    name: zombie-holdout
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
