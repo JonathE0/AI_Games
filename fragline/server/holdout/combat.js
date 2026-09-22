@@ -1,5 +1,5 @@
-// Player explosives in the Holdout: grenades (bounce, then blow up), molotovs (fire pools), freeze grenades,
-// and rockets from the Rocket Launcher / rocket turrets. Everything is simulated here and only hurts zombies.
+// Player explosives in the Holdout: grenades (bounce, then blow up), molotovs (fire pools), freeze grenades
+// (a Blizzard field that slows zombies and freezes the ones that linger), and rockets from the Rocket Launcher / rocket turrets. Everything is simulated here and only hurts zombies.
 import { WEAPONS } from '../../shared/weapons.js';
 import { ITEMS } from '../../shared/holdout.js';
 import { gunMult } from '../../shared/items.js';
@@ -16,7 +16,8 @@ export class Combat {
   reset() {
     this.flying = [];   // thrown grenades / molotovs / freezes and rockets
     this.fires = [];    // burning molotov pools
-    this.bomblets = [];  // Brood Launcher: bomblets waiting to burst after landing
+    this.bomblets = [];  // Brood Launcher / Siegebreaker: bomblets waiting to burst after landing
+    this.fields = [];   // Blizzard fields left by freeze grenades
     this.nextId = 1;
   }
 
@@ -39,7 +40,7 @@ export class Combat {
 
   onRocket(p, m) {
     const g = gunByUid(p, m.uid), now = Date.now();
-    if (!g || !WEAPONS[g.id].projectile || !p.alive || p.downed) return;
+    if (!g || !WEAPONS[g.id].projectile || !p.alive || p.downed || p.bar?.up) return; // not from behind a raised barrier
     const w = WEAPONS[g.id], gap = (60000 / w.rpm) * 0.7 / (this.room.buffActive('rate') ? 1.3 : 1);
     if (now - (p.lastShot[g.id] || 0) < gap) return;
     p.lastShot[g.id] = now;
@@ -50,7 +51,7 @@ export class Combat {
     const dir = d.map(v => v / l), dmg = w.dmg * gunMult(g) * this.room.dmgMultFor(p);
     if (w.projectile === 'grenade') return this.lob(p, [...m.o], dir, dmg, w.splash, g.el, w.bomblets || 0);
     if (w.projectile === 'blast') return this.room.blast(p, [...m.o], dir, w, gunMult(g) * this.room.dmgMultFor(p));
-    this.rocket([...m.o], dir, p, dmg, w.splash, g.el);
+    this.rocket([...m.o], dir, p, dmg, w.splash, g.el, w.bomblets || 0);
   }
 
   // Grenade launcher round: arcs, explodes on the first thing it touches. bomblets: the Brood Launcher's perk.
@@ -60,18 +61,18 @@ export class Combat {
     this.room.broadcast({ t: 'thr', id: pr.id, item: 'glnade', o: o.map(r2), v: pr.vel.map(r2) });
   }
 
-  // Brood Launcher: 3 bomblets land 2-4 m out and burst ~0.6 s later for half damage in a smaller radius,
-  // each leaving a zombie-only acid pool for 5 s.
+  // Brood Launcher / Siegebreaker: 3 bomblets land 2-4 m out and burst ~0.6 s later for half damage in a smaller
+  // radius; the Brood Launcher's (grenade rounds) each leave a zombie-only acid pool for 5 s.
   spawnBomblets(center, pr, now) {
     for (let i = 0; i < pr.bomblets; i++) {
       const a = Math.random() * Math.PI * 2, r = 2 + Math.random() * 2;
-      this.bomblets.push({ p: [center[0] + Math.cos(a) * r, center[1], center[2] + Math.sin(a) * r], dmg: pr.dmg * 0.5, splash: pr.splash * 0.6, owner: pr.owner, at: now + 600 });
+      this.bomblets.push({ p: [center[0] + Math.cos(a) * r, center[1], center[2] + Math.sin(a) * r], dmg: pr.dmg * 0.5, splash: pr.splash * 0.6, owner: pr.owner, at: now + 600, w: pr.kind === 'glnade' ? 'broodlauncher' : 'siegebreaker' });
     }
   }
 
   // Also used by rocket turrets (owner = the player who placed it).
-  rocket(o, dir, owner, dmg, splash, el = null) {
-    const pr = { id: this.nextId++, kind: 'rocket', pos: o, vel: dir.map(v => v * 42), born: Date.now(), owner, dmg, splash, el };
+  rocket(o, dir, owner, dmg, splash, el = null, bomblets = 0) {
+    const pr = { id: this.nextId++, kind: 'rocket', pos: o, vel: dir.map(v => v * 42), born: Date.now(), owner, dmg, splash, el, bomblets };
     this.flying.push(pr);
     this.room.broadcast({ t: 'rkt', id: pr.id, o: o.map(r2), d: dir.map(v => Math.round(v * 1000) / 1000), by: owner?.id ?? null });
   }
@@ -122,7 +123,20 @@ export class Combat {
         room.damageZombie(z, ITEMS.molotov.dps * 0.25, f.owner, 'molotov');
       }
     }
-    // Brood Launcher bomblets: burst a beat after landing
+    // Blizzard fields: zombies inside are slowed, and the time they spend inside adds up (across fields and visits)
+    // until they freeze solid — brittle while it lasts (room.damageZombie). Bodies riding or tunnelling are out of reach.
+    if (this.fields.length) {
+      const F = ITEMS.freeze;
+      this.fields = this.fields.filter(f => now < f.until);
+      for (const z of room.zombies.values()) {
+        if (z.dead || z.mount || z.under || !this.fields.some(f => Math.hypot(z.pos[0] - f.p[0], z.pos[2] - f.p[2]) <= F.radius && Math.abs(z.pos[1] - f.p[1]) <= 2)) continue;
+        z.slowUntil = Math.max(z.slowUntil, now + 250); z.slow = Math.max(z.slow || 0, F.slow);
+        if (now < z.frozenUntil) continue;
+        z.iceT = (z.iceT || 0) + dt;
+        if (z.iceT >= F.freezeAfter) { z.iceT = 0; z.frozenUntil = z.brittleUntil = now + F.freeze * 1000; }
+      }
+    }
+    // Brood Launcher / Siegebreaker bomblets: burst a beat after landing
     for (let i = this.bomblets.length - 1; i >= 0; i--) {
       const b = this.bomblets[i];
       if (now < b.at) continue;
@@ -130,9 +144,9 @@ export class Combat {
       for (const z of room.zombies.values()) {
         if (z.dead) continue;
         const d = Math.hypot(z.pos[0] - b.p[0], z.pos[2] - b.p[2]);
-        if (d <= b.splash) room.damageZombie(z, b.dmg * (1 - (0.5 * d) / b.splash), b.owner, 'broodlauncher');
+        if (d <= b.splash) room.damageZombie(z, b.dmg * (1 - (0.5 * d) / b.splash), b.owner, b.w);
       }
-      addHazard(room, 'acidz', b.p, b.splash * 0.7, 5, 0, 0, 18, b.owner);
+      if (b.w === 'broodlauncher') addHazard(room, 'acidz', b.p, b.splash * 0.7, 5, 0, 0, 18, b.owner);
       room.broadcast({ t: 'boom', id: 0, item: 'glnade', p: b.p.map(r2) });
     }
   }
@@ -147,6 +161,7 @@ export class Combat {
         room.damageZombie(z, it.dmg * (1 - (0.6 * d) / it.radius) * (room.buffActive('damage') ? 1.3 : 1), pr.owner, 'grenade');
       }
       room.bosses.blastMaw(p, it.radius, it.dmg, pr.owner);
+      room.bosses.behemoth.blast(p, it.radius, it.dmg, pr.owner);
     } else if (pr.kind === 'rocket' || pr.kind === 'glnade') {
       for (const z of inRange(pr.splash)) {
         const d = Math.hypot(z.pos[0] - p[0], z.pos[2] - p[2]), dmg = pr.dmg * (1 - (0.5 * d) / pr.splash);
@@ -154,12 +169,14 @@ export class Combat {
         if (pr.el && !z.dead) room.applyElement(z, pr.el, dmg, pr.owner);
       }
       room.bosses.blastMaw(p, pr.splash, pr.dmg, pr.owner);
+      room.bosses.behemoth.blast(p, pr.splash, pr.dmg, pr.owner);
       if (pr.bomblets) this.spawnBomblets(p, pr, now);
     } else if (pr.kind === 'molotov') {
       const it = ITEMS.molotov;
       this.fires.push({ p: [...p], r: it.radius, until: now + it.burn * 1000, nextTick: now, owner: pr.owner });
-    } else if (pr.kind === 'freeze') {
-      for (const z of inRange(ITEMS.freeze.radius)) z.frozenUntil = now + ITEMS.freeze.freeze * 1000;
+    } else if (pr.kind === 'freeze') { // the field lies on whatever surface is below the blast (a body hit bursts in mid-air)
+      p = [p[0], room.inventory.surfaceBelow(p[0], p[2], p[1] + 0.1), p[2]];
+      this.fields.push({ p, until: now + ITEMS.freeze.time * 1000 });
     }
     room.broadcast({ t: 'boom', id: pr.id, item: pr.kind, p: p.map(r2) });
   }
@@ -167,5 +184,6 @@ export class Combat {
   syncTo(p) {
     const now = Date.now();
     for (const f of this.fires) this.room.send(p, { t: 'boom', id: 0, item: 'molotov', p: f.p.map(r2), left: f.until - now });
+    for (const f of this.fields) this.room.send(p, { t: 'boom', id: 0, item: 'freeze', p: f.p.map(r2), left: f.until - now });
   }
 }

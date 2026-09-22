@@ -15,8 +15,9 @@ export const ZTYPES = {
   stalker: { id: 'stalker', name: 'Stalker', weight: 0.5, hp: 70, speed: 6.2, scale: 0.72, dmg: 9, sdmg: 12, reach: 1.3, windup: 0.3, cooldown: 0.55, reward: 90, cost: 1.4, from: 4, aggro: 18 },
   // stays back by its spawn gate and snipes (survivors and turrets take double); a laser gives it away
   sniper: { id: 'sniper', name: 'Sniper', weight: 1, hp: 140, speed: 2.6, scale: 1, dmg: 29, npcDmg: 58, sdmg: 20, reach: 1.5, windup: 2.2, cooldown: 4, reward: 220, cost: 3, from: 6, sniper: true, range: 70, noVariant: true },
-  // bursts into an acid pool when it dies: shoot it before it reaches you
-  bloater: { id: 'bloater', name: 'Bloater', weight: 1.5, hp: 300, speed: 1.8, scale: 1.2, dmg: 14, sdmg: 40, reach: 1.6, windup: 0.8, cooldown: 1.6, reward: 180, cost: 3, from: 6, burst: { radius: 4, dmg: 30, sdmg: 120, pool: 5, dps: 12 }, deployOdds: 0.05 },
+  // bursts into an acid pool when it dies: shoot it before it reaches you. burst: dmg/dps hurt players,
+  // sdmg/sdps builds and props (kept low — the acid is a threat to you, not a wall breaker)
+  bloater: { id: 'bloater', name: 'Bloater', weight: 1.5, hp: 300, speed: 1.8, scale: 1.2, dmg: 14, sdmg: 40, reach: 1.6, windup: 0.8, cooldown: 1.6, reward: 180, cost: 3, from: 6, burst: { radius: 4, dmg: 30, sdmg: 35, pool: 5, dps: 12, sdps: 9 }, deployOdds: 0.05 },
   // lobs blindness potions and leaves ink clouds
   hexer: { id: 'hexer', name: 'Hexer', weight: 1, hp: 130, speed: 2.4, scale: 1, dmg: 10, sdmg: 20, reach: 1.5, windup: 0.9, cooldown: 4.5, reward: 200, cost: 3, from: 7, ranged: true, range: 16, keep: 8, splash: 3, potion: 'blind' },
   // tunnels once under a build that blocks it and comes up one tile past it
@@ -60,6 +61,9 @@ export const ZTYPES = {
   frost: { id: 'frost', name: 'Frost Walker', weight: 1.2, hp: 260, speed: 2.4, scale: 1.1, dmg: 14, sdmg: 45, reach: 1.6, windup: 0.7, cooldown: 1.4, reward: 220, cost: 3, from: 12, immune: 'ice', weak: ['fire'], chillAura: 5 },
   // only spawns on night waves: nothing special about its AI, it just hides in the dark (see public/js/zombies.js)
   shade: { id: 'shade', name: 'Shade', weight: 0.6, hp: 160, speed: 3.6, scale: 1, dmg: 6, sdmg: 8, reach: 1.5, windup: 0.5, cooldown: 1.3, reward: 180, cost: 1.4, from: 6, nightOnly: true, noVariant: true },
+  // wave 20 boss (server/holdout/gravekeeper.js): a ~4.5 m undertaker who walks for the Core smashing builds (breaker);
+  // his scythe sweeps a `sweep`-degree arc that knocks players back. Immune while any of his grave pits is open.
+  gravekeeper: { id: 'gravekeeper', name: 'Gravekeeper', hp: 45000, speed: 1.4, scale: 2.4, dmg: 40, sdmg: 700, reach: 3.4, windup: 1.1, cooldown: 2.4, reward: 1500, cost: 0, boss: true, noVariant: true, breaker: true, sweep: 150 },
 };
 export const ZTYPE_IDS = Object.keys(ZTYPES); // index = id on the wire
 
@@ -87,8 +91,9 @@ export const ZDROPS = {
 export const WAVES = 10; // the old finale; waves now go on forever and simply keep getting harder
 export const DIFFS = { casual: 0.7, normal: 1, hard: 1.4 };
 
-// A boss every 5 waves, rotating: the Colossus (5, 20, 35…), the Brood Titan (10, 25…), the Maw (15, 30…).
-export const BOSS_ROTATION = ['sky', 'titan', 'maw'];
+// A boss every 5 waves, rotating: the Colossus (5), the Brood Titans (10), the Maw (15), the Gravekeeper (20), the
+// Behemoth (25), then around again (bossCycle: +50 % HP each time).
+export const BOSS_ROTATION = ['sky', 'titan', 'maw', 'grave', 'behemoth'];
 export const bossFor = w => (w > 0 && w % 5 === 0 ? BOSS_ROTATION[(w / 5 - 1) % BOSS_ROTATION.length] : null);
 export const bossCycle = w => Math.max(0, Math.floor((w / 5 - 1) / BOSS_ROTATION.length)); // 0 = first time around
 // the Alpha Brute shows up as an elite every 4th wave from wave 12 (never on a boss wave)

@@ -55,12 +55,14 @@ variables. Play and Join then use that server instead of solo mode.
 | Ctrl | Crouch (crouch in the air to crouch-jump) |
 | Space | Jump |
 | Left click | Fire / knife slash |
-| Right click | Scope (AWP/SSG, 2 zoom levels) / knife stab |
-| R | Reload |
-| 1–6, mouse wheel | Hotbar slots (guns or items), cycle |
+| Right click | Scope (AWP/SSG, 2 zoom levels) / knife stab / Tank: hold to raise your barrier (any other gun) / Ronin: **Fire Strike** with the katana |
+| R | Reload · Ronin with the katana in hand: **Deflect** |
+| 1–6, mouse wheel | Hotbar slots (guns or items), cycle — the Ronin has only 1–3 |
+| 4 | Ronin: **katana dash** (it shares hotbar slot 4's key — **8** left-handed; the dash may share a key only with slots 4–6, which the Ronin doesn't have) |
 | X | Harvest tool (the harvesting knife) · press again to inspect it (the karambit twirls around its ring) |
 | Q · F · C · Shift | Build a wall · floor · stair · cone — from anywhere, no build mode (**Z** trap, **V** turret / Rally Fire, **G** edit) |
 | B | Shop — inside the ring around the Core |
+| U | Upgrade the turret you're standing by (within 3 m) — anywhere, anytime, no Blacksmith needed |
 | Tab | Scoreboard |
 | Enter | Chat |
 | Esc | Pause + settings (sensitivity, FOV, crosshair, volume) |
@@ -101,13 +103,13 @@ of purple storm gates on the north/east/south/west edges, and you build, harvest
 
   | Class | Effect |
   | --- | --- |
-  | Tank | 300 HP, a bit slower, takes 15 % less damage, immune to knockback/stuns from zombies, builds & repairs 25 % faster |
+  | Tank | 300 HP, a bit slower, takes 15 % less damage, immune to knockback/stuns from zombies, builds & repairs 25 % faster, **barrier**: hold right-click with any gun but a sniper to raise a 4 × 2.6 m energy wall 1.2 m ahead (1200 HP; soaks swings, globs, sniper shots and boss projectiles from the front for anyone behind it; no firing and 60 % speed while it's up; regrows 150 HP/s 2 s after lowering, 4 s down when broken) |
   | Assault | 200 HP, +20 % damage, 50 % bigger magazines, carries 50 % more ammo, 10 % faster, +15 % fire rate for 3 s after a kill |
-  | Medic | 200 HP, regenerates, heals teammates and survivors within 5 m, revives twice as fast, Adrenaline Shots 25 % stronger, 3 free Adrenaline Shots every 2 waves, regens shield near the Core |
+  | Ronin (Melee) | Replaced the Medic (an old Medic pick becomes the Ronin). 200 HP, 20 % faster, heals 3 HP/s anywhere after 3 s without damage, grows an Adrenaline Shot every 5 s up to **30** (into the sack or a free slot, like a pickup). Only **3 hotbar slots**: slot 1 is the **Zinkonium Katana**, locked there (it can't be moved, dropped, sold, stashed or unlocked), slots 2–3 are free; taking the kit empties hotbar slots 1 and 4–6 into the backpack (at your feet when it's full), leaving it takes the katana away — its kills and upgrades stay with you. **The katana:** LMB is a 3-hit combo (95 / 95 / 150, 3 m reach, 110° arcs, the third a 150° arc that shoves; a swing every 0.35 s, the chain resets after a 0.9 s pause). RMB **Fire Strike**: a flaming crescent (25 m/s, 30 m) that passes through every zombie it touches for 120 + burn, and through your builds and the map's props without hurting them (only the ground, the map's edge and the Core stop it), 6 s cooldown. **R: Deflect** — a 1.2 s stance (3 s cooldown) that blocks zombie swings, globs, sniper shots and boss projectiles from the front and sends projectiles back at their shooter for 2× their damage (a sniper shoots itself); a block in the first 0.25 s is a **perfect parry**: +15 HP and +1 Adrenaline Shot (once a stance), and a parried swing staggers the zombie. **Dash key: dash** 7 m along your aim in 0.2 s, cutting every zombie you pass through for 80, stopped by walls, 5 s cooldown. Every hit adds a **bleed** stack (3 dps for 4 s, up to 5 — red drips) and hits from behind (more than 110° off a zombie's facing) crit ×1.5. Cooldown pips sit under the crosshair. Upgrades: the Blacksmith's Katana tree (below) |
 
 - **Zombies:** Shambler, Runner, Spitter (lobs acid over walls), Brute (armored wall-breaker), plus:
   Stalker (small, fast, rapid swings — from wave 4), Sniper (camps near its gate, laser telegraph, hits
-  survivors and turrets twice as hard — 6), Bloater (bursts into an acid pool — 6), Hexer (throws blinding
+  survivors and turrets twice as hard — 6), Bloater (bursts into an acid pool that burns you, barely your builds — 6), Hexer (throws blinding
   ink — 7), Burrower (tunnels once under a build and
   pops up a tile past it — 9), Shieldbearer (front shield stops bullets; flank it or use explosives,
   elements and knockback — 9), Pyro (fire, immune to fire — 11), Frost Walker (slowing aura, immune to ice — 12),
@@ -126,39 +128,62 @@ of purple storm gates on the north/east/south/west edges, and you build, harvest
   From wave 6 some zombies come as **Tank** (2× HP, bigger), **Assault** (faster, harder hits) or **Medic**
   (heals zombies around it) variants. The Alpha Brute returns as an elite every 4th wave from wave 12.
 - **Bosses** every 5 waves, each repeat 50 % tougher:
-  - **The Colossus (5, 20, 35…):** circles overhead bombing the fort; only snipers hurt it, only through its
+  - **The Colossus (5, 30, 55…):** circles overhead bombing the fort; only snipers hurt it, only through its
     small glowing weak points — when only the one on its back is left, the game says so and marks it. Drops the
     **Skybreaker**.
-  - **The Brood Titan (10, 25…):** announced at the start of the wave, stomps in once the horde is dead. Its
+  - **The Brood Titan (10, 35…):** announced at the start of the wave, stomps in once the horde is dead. Its
     riders throw acid and can't be hurt while mounted: two leap off the moment it arrives and more every 12 s, it
     drops fresh minions off its back every 8 s, and two Sniper Riders stay up there picking you off the whole
     fight. Kill the Titan and the rest fall off. It drops the **Brood Launcher**.
-  - **The Maw (15, 30…):** a giant worm hunting underground and bursting up under builds and players. Hold **E**
+  - **The Maw (15, 40…):** a giant worm hunting underground and bursting up under builds and players. Hold **E**
     on the **seismic thumpers** (in the two houses and a corner shack, shown on the map) to lure it up stunned —
     shoot the glowing throat for triple damage. Below 25 % it tunnels toward the Core to devour it: arm two
     thumpers or blast its mouth to stop it. Drops the **Maw Fang**. It leaves the fort in pieces, so the break
     after a Maw wave runs **4 minutes** instead of the usual timer — enough to rebuild the Core area properly.
+  - **The Gravekeeper (20, 45…):** a 4.5 m undertaker with a bronze bell on his back walks for the Core, smashing
+    builds and sweeping his scythe (it knocks you back — not Tanks). He opens **grave pits** 12–24 m out (4, +1 per
+    extra player, max 7; violet cracks, marked on the map) and every **bell toll** (~10 s) each open pit raises two
+    zombies. While any pit is open a **spectral ward** makes him immune: build a **cone** on a pit's tile to seal
+    it. With every pit sealed the ward drops and hits on his **bell** (from behind) deal double — but his lantern
+    (every ~15 s) and the pit zombies go for the lids, and a broken lid brings the ward back. His whole wave
+    arrives by **lightning**: a bolt strikes, the zombie rises out of the ground over 2.5 s (shoot it — it can't
+    fight yet) and the spot stays electrified for 4 s (hurts players only). At 60 % two more pits open; at 30 %
+    the **Death Knell** rains bolts around everyone for 10 s. Drops the **Knell**.
+  - **The Behemoth (25, 50…):** a walking fortress (11 × 7 m, a flat deck 6.4 m up), announced at the wave start,
+    marches in once the horde is dead: straight down one lane at ~1.1 m/s, crushing every build and prop in its
+    path (each build it flattens holds it up ~1.2 s, so barricades buy time) and shoving players aside. Every
+    ~20 s it **braces** for 7 s and lobs 3 siege shells at the Core (their arcs and landing rings show; ~150
+    each). Only its 3 **reactor hearts** can be hurt, each under a hatch on the deck: **stair up** onto it (a
+    level-1 stair on the tile beside its flank steps right onto the deck — it can't be built into, and pieces
+    don't attach to it; braced is the easy moment), ride the moving deck, break the hatch's 3 bolts with the
+    **harvest tool** (2 hits each) and shoot the heart (explosives work too); anything else answers IMMUNE. A
+    zombie crew climbs aboard every 12 s. Each heart that bursts makes it rear up and throw everyone off the
+    deck (not Tanks); the last one brings it down. If it reaches the Core it slams it for 15 % of the Core's
+    max HP every 6 s. Drops the **Siegebreaker**.
   - **Boss weapons** (always Legendary, tier III): **Skybreaker** — sniper whose shots pierce every zombie in
     a line and mark them (+25 % damage from everyone for 5 s); **Brood Launcher** — grenades split into acid
     bomblets that leave zombie-melting pools; **Maw Fang** — shotgun that heals you for 10 % of its damage, and
     every 5th shot yanks nearby zombies together; **Alpha Cleaver** (the elite Alpha Brute) — huge 150° cleave
-    that knocks zombies down, and you run faster holding it.
+    that knocks zombies down, and you run faster holding it; **Knell** — lightning rifle whose hits chain to the 2
+    nearest zombies, and every 4th hit leaves a 2 s shock pool that only hurts zombies; **Siegebreaker** —
+    rocket launcher whose rockets split into 3 cluster bomblets on impact.
 - **Night waves** (a quarter of the time from wave 4, never with a boss; announced a break ahead): nearly black,
   short view distance. Find zombies by their eyes, muzzle flashes and sound — or fit a **flashlight** (it comes
   on by itself in the dark, works on any wave; **L** toggles it). Zombies drop flashlights on night waves.
   **Night Vision Goggles** (head armor) switch the view to a bright green night-vision image when it gets dark
   (**L** flips them up when your gun has no flashlight).
-- **Inventory (I):** Minecraft-style — 6 hotbar slots (**1–6**, **X** = harvesting knife) + 18 backpack slots
+- **Inventory (I):** Minecraft-style — 6 hotbar slots (**1–6**, **X** = harvesting knife; the Ronin gets 3, his katana in the first) + 18 backpack slots
   + 4 armor slots (head / chest / legs / feet). Drag and drop to rearrange, shift-click to quick-move, drag an
   item outside the panel to drop it, or hover an item and press **1–6** to swap it into that hotbar slot.
   A separate 4-slot **sack** always rides along for **Adrenaline Shots** (**H**, or **7 8 9 0** per sack slot), the
-  only carried heal: +25 HP and +25 shield at once, then +4 HP/s for 5 s (stacks of 10, 1.5 s cooldown). About one
+  only carried heal: +25 HP and +25 shield at once, then +4 HP/s for 5 s (stacks of 10, carry up to 20 — the Ronin 30, 1.5 s cooldown). About one
   kill in eight drops one, Brutes, Wardens and Golems always drop 1-3, and chests, supply drops and bosses carry
-  stacks. Otherwise you heal at Rally Fires, near a Medic, or by resting inside the Core ring (+2 HP/s once you've
+  stacks. Otherwise you heal at Rally Fires, near a Medic survivor, anywhere as a Ronin, or by resting inside the Core ring (+2 HP/s once you've
   gone 4 s without being hit). Ammo and materials are counters. Next to the team chest the chest opens
   beside it. Anything in the hotbar is usable: guns shoot, throwables throw on click (**T** quick-throws, **N**
-  picks which), Adrenaline Shots are used on click, traps and turrets start placing them. **E** picks things up; only the
-  inventory key opens and closes the inventory. There's no drop key: drag an item out of the window to throw it away, or
+  picks which), Adrenaline Shots are used on click, traps and turrets start placing them. **E** picks things up; the
+  inventory key opens and closes the inventory — bind both to one key (smart E) and it uses whatever is in range,
+  otherwise it opens or closes the inventory. There's no drop key: drag an item out of the window to throw it away, or
   sell it to the Banker. Every gun shows its own icon in the tiles and its own silhouette when it's on the ground,
   with a name label as you get close.
 - **Guns:** Fortnite-style pistols, SMGs, ARs, shotguns, a Hand Cannon, rockets, the SSG 08 and AWP, plus the
@@ -166,19 +191,38 @@ of purple storm gates on the north/east/south/west edges, and you build, harvest
   zombies until they slam into a wall, build or prop — up to 20 m for light ones, less for heavy ones, bosses
   don't move — and the slam hurts and stuns) and the **Slasher Blade** (Stalker
   drop: wide slash, run 15 % faster). Snipers drop SSGs (AWPs from wave 15), Bloaters drop grenade launchers.
-  Every gun has a rarity (Common → Legendary) and on top of that a **tier** (I → III, ×1 / 1.25 / 1.55
-  damage; tier II at the Core, tier III at the Blacksmith) and maybe an **element** (buy an elemental version of
+  Every gun has a rarity (Common → Legendary) and on top of that a **tier** (I → V, ×1 / 1.25 / 1.55 / 1.85 / 2.2
+  damage; tier II at the Core, tier III at the Blacksmith, IV and V are Blacksmith milestones) and maybe an **element** (buy an elemental version of
   any shop gun at the Core, find one, or infuse at the Blacksmith; rarity can be upgraded at the Core up to
   Legendary): fire (burns), water (soaks
   and slows; soaked zombies freeze instantly from ice and take double shock), ice (chills → freezes), shock
-  (chains to 2 more zombies).
+  (chains to 2 more zombies) — plus **toxic** (a Blacksmith milestone only: poisons for 4 s, and a zombie that dies
+  poisoned leaves a 3 m cloud for 3 s that poisons the ones around it).
+- **Weapon mastery:** every gun counts the kills made with it (shown as **M1–M8** on its tile and in the
+  inventory info: level 2 at 25 kills, then 60, 110, 180, 270, 380 and 520). The Blacksmith's milestones need it.
 - **Armor** (shop, chests, bosses; upgrade to tier III): Combat Helmet, Hex Goggles (resist blindness), Kevlar
   Vest, Fireproof Vest (resist burning), Padded Pants, Insulated Pants (resist slows), Combat Boots, Swift Step
   Boots (run faster), Night Vision Goggles.
 - **The Blacksmith** (after wave 7 clears, anvil beside the Core, **E**): tier III forging for guns and
   armor, element infusion, attachments (Extended Mag, Compensator, Flashlight, Laser Sight) and turret upgrades
-  (damage, range, fire rate, ammo refill, incendiary / frost rounds, armor plate — stand near the turret).
+  (per level +40 % damage, +25 % range, +30 % fire rate, +100 % ammo capacity, +50 % HP plating; ammo refill and
+  incendiary / frost rounds too). Every upgrade shows on the turret: extra barrels, a scope dish, spinning motor
+  rings, ammo boxes, armour plates and an orange / blue glow. **U** upgrades the turret you're standing by without him.
   Forging tier III and infusing an element cost money plus **Zinkonium**.
+  **Milestones** open every 5 waves reached and each needs the gun's mastery level + money + Zinkonium:
+  wave 5 **Multishot** (one extra round per shot at 50 % damage) and the **Toxic** element (M2, $2500 + 120),
+  wave 10 **Tier IV** (M4, $4000 + 200), wave 15 **Piercing** (rounds go on through one more zombie at 70 %) and
+  **Explosive tips** (1.5 m splash at 30 %, zombies only) (M3, $3500 + 160), wave 20 **Tier V** (M6, $8000 + 400)
+  and wave 25 a **second mod slot** (M7, $6000 + 300). One mod slot until then — a new mod replaces the old one.
+  **The Ronin's katana** has its own tree in the panel's Katana section (no tiers, infusions or attachments on it);
+  each upgrade needs the katana's mastery (its kills — bleed and reflected kills count) + money + Zinkonium + the wave
+  reached: **Edge I–V** (+20 % damage each, in order: I M1 $1000 + 60, II M2 $2000 + 100, III wave 10 M3 $3500 + 160,
+  IV wave 15 M5 $5500 + 240, V wave 20 M7 $8000 + 360), wave 5 **Twin Fire Strike** (two crescents in a V, M3 $3000 + 150)
+  and **Mirror Deflect** (reflections hit twice as hard again, a 0.35 s perfect window, M3 $2500 + 120), wave 10 **Ember
+  Trail** (Fire Strike leaves burning ground for 3 s that only hurts zombies, M4 $4000 + 200) and **Chain Dash** (two
+  dashes per cooldown, M4 $4000 + 180), wave 15 **Hemorrhage** (bleed stacks to 10 and bleeds 50 % harder, M5 $4500 +
+  200) and **Execution** (the combo's third hit kills a non-boss zombie left under 15 %, M6 $6000 + 260), wave 20
+  **Elemental Edge** (shock, cryo, toxic or fire on the blade and Fire Strike, M5 $5000 + 220 — switching costs it again).
 - **Building (Fortnite Builder Pro — no build mode):** walls, floors, stairs and cones on a 4 m grid, each on
   its own key that starts building it from anywhere — **Q** wall · **F** floor · **C** stair · **Shift** cone ·
   **Z** trap · **V** turret / Rally Fire · **R** rotate the stair while building (it always rises away from you)
@@ -214,8 +258,9 @@ of purple storm gates on the north/east/south/west edges, and you build, harvest
   to turn them, or over two side by side for a half stair rising that way. **Ladders** on every face of the Core
   lead to its roof.
 - **Shop (B, inside the ring around the Core — the ring is wide now):** one page with everything to buy —
-  guns (each also as a fire / water / ice / shock version), ammo, grenades / molotovs / freeze grenades,
-  **Adrenaline Shots**, floor spikes, wall darts, flame grills,
+  guns (each also as a fire / water / ice / shock version), ammo (rockets come 5 a pack, 50 carried), grenades /
+  molotovs / freeze grenades (a **Blizzard**: a 6 m icy field for 6 s — zombies in it slow to half speed, freeze solid
+  for 3 s after 1.5 s inside and take +25 % damage while frozen), **Adrenaline Shots**, floor spikes, wall darts, flame grills,
   auto turret $1800, rocket turret $3000, **Rally Fire** (heals health and recharges shields) and armor.
   Duplicates are fine — buy a second SMG whenever you like. Three more tabs:
   **Upgrades** (your guns: rarity up to Legendary, tier II), **Team** (timed powerups plus permanent 5-level team
@@ -235,7 +280,8 @@ of purple storm gates on the north/east/south/west edges, and you build, harvest
   upgrades have no cap (each level costs more), and a flashlight and a laser sight fit on the same gun.
 - **Team chest** (next to the Core): share money, materials, ammo and items; pooled money is the team bank.
   Hold **E** at the Core to repair it between waves (one player at a time; not during a wave). The Core also
-  mends itself very slowly all match long.
+  mends itself: 1 % of its health per second during breaks, 0.2 %/s in a wave once it has gone 8 s unhit (its bar
+  glows while it heals).
 - **Map:** a minimap top-left (north up, follows you) shows houses, trees, builds, the Core, lanes, teammates,
   survivors, zombies (at night only close ones, the ones in your flashlight or ones lit up by gunfire), loot,
   chests, drops, thumpers and the Blacksmith. **M** opens the full map: wheel to zoom, drag to pan, click to
@@ -249,13 +295,15 @@ of purple storm gates on the north/east/south/west edges, and you build, harvest
   people around it, light gun) or a **Ranger** (rifle, best damage, stays back), and their tier — Recruit, Guard,
   Soldier, Marksman — sets how good their gun is. They look after themselves: they keep firing while backing away
   from anything that gets close, never stray far from the Core, and fall back when hurt. They heal very slowly on
-  their own (a Medic or a Rally Fire patches them faster) and die for good.
+  their own (a Medic survivor or a Rally Fire patches them faster) and die for good.
 
 Tuning lives in `shared/zombies.js` (types, bosses, scaling, night, drops), `shared/holdout.js` (items,
 armor, attachments, classes, the Blacksmith, loot, survivors, breaks), `shared/items.js` (inventory, tiers),
 `shared/elements.js`, `shared/skyboss.js` (the Colossus), `shared/build.js` (grid, materials, edits, integrity),
 `shared/outpost.js` (map, props, thumpers), `server/holdout/room.js` (`HOLDOUT` timers/economy),
-`server/holdout/bosses.js` (Titan and Maw) and `server/holdout/flowfield.js` (how hard zombies avoid walls).
+`server/holdout/bosses.js` (Titan and Maw), `server/holdout/gravekeeper.js` (the Gravekeeper),
+`shared/behemoth.js` + `server/holdout/behemoth.js` (the Behemoth) and
+`server/holdout/flowfield.js` (how hard zombies avoid walls).
 
 ## What's modeled
 
@@ -270,7 +318,9 @@ armor, attachments, classes, the Blacksmith, loot, survivors, breaks), `shared/i
   control. Every shot kicks the view; tapping/bursting resets recoil, and pistols recover quickly between taps.
   Recoil strength per gun is the last number in its `pattern(...)` call in `shared/weapons.js`.
 - **Hitboxes** — head, chest, arms, stomach, legs; the character model *is* the hitboxes. Crouching shrinks
-  them. Multipliers: head ×4, stomach ×1.25, chest/arms ×1, legs ×0.75.
+  them; zombies are hit exactly as drawn that frame (hunched, nodding, arms raised, flyers' wings), and the
+  server accepts hit claims on where a zombie was up to 1 s ago (lag). Multipliers: head ×4, stomach ×1.25,
+  chest/arms ×1, legs ×0.75.
 - **Damage** — CS2 base damage, range falloff, armor penetration per weapon, helmet protects the head,
   legs are never armored. Distinct hit sounds: a crunchy *ding* for headshots, a special sound for headshot
   kills, and a metallic *dink* when your bullet glances off a helmet. Bullets penetrate wood crates and thin
@@ -329,14 +379,16 @@ similar. To use your own, drop `.wav`, `.mp3` or `.ogg` files into `public/sound
 server.js            HTTP + WebSocket server, room registry (create room / join by code / quick match)
 server/baseRoom.js   shared room plumbing (messaging, weapon item ids)
 server/holdout/      Zombie Holdout: room (waves, building, props, integrity, revives), director, zombie AI,
-                     behaviors (specialist zombies), bosses (Brood Titan, the Maw), blacksmith, flow field,
+                     behaviors (specialist zombies), bosses (Titan, Maw), gravekeeper, blacksmith, flow field,
                      inventory (grid/armor/shop/team chest/pickups), combat (throwables/rockets/elements),
-                     defenses (traps/turrets), survivors, skyboss (the Colossus), events (chests/supply drops)
+                     defenses (traps/turrets), survivors, skyboss (the Colossus), events (chests/supply drops),
+                     barrier (the Tank's shield)
 shared/              weapons, outpost map, physics/hitboxes, building grid, zombie types, holdout gear, items
                      (inventory rules, tiers), elements, Colossus path
 public/js/           client: game loop, movement, weapons, HUD, audio, models, networking
 public/js/holdout.js Zombie Holdout client (+ zombies.js horde, build.js pieces/build+edit mode, props.js map
                      props, holdout_ents.js loot/traps/survivors/bosses, holdout_ui.js hotbar/shop/Blacksmith,
-                     inventory_ui.js inventory, minimap.js minimap + full map, night.js night lighting)
+                     inventory_ui.js inventory, minimap.js minimap + full map, night.js night lighting,
+                     boss_gravekeeper.js the Gravekeeper's gear, graves and lightning)
 .claude/agents/      fragline-builder: the Sonnet implementation agent (see CLAUDE.md for the Opus/Sonnet split)
 ```

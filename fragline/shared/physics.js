@@ -149,7 +149,27 @@ export function hitboxes(c = 0) {
   ];
 }
 
-// Ray vs a player's hitboxes. pl = { x, y, z, yaw, c, s?, id? } (s = size scale, e.g. big zombies).
+// Ray vs a box as drawn: the column-major 4x4 at m[k..k+15] maps the unit cube (a Three.js instance or world
+// matrix, rotation × scale, so its axes are orthogonal). Returns the distance along d, or -1 on a miss.
+function rayDrawnBox(o, d, m, k = 0) {
+  let tIn = 0, tOut = Infinity;
+  for (let a = k; a < k + 12; a += 4) {
+    const ax = m[a], ay = m[a + 1], az = m[a + 2], l2 = ax * ax + ay * ay + az * az;
+    if (l2 < 1e-12) return -1; // a hidden (zero-scaled) box
+    const p = ((m[k + 12] - o[0]) * ax + (m[k + 13] - o[1]) * ay + (m[k + 14] - o[2]) * az) / l2;
+    const f = (d[0] * ax + d[1] * ay + d[2] * az) / l2;
+    if (Math.abs(f) < 1e-12) { if (Math.abs(p) > 0.5) return -1; continue; }
+    const t1 = (p - 0.5) / f, t2 = (p + 0.5) / f;
+    tIn = Math.max(tIn, Math.min(t1, t2));
+    tOut = Math.min(tOut, Math.max(t1, t2));
+    if (tIn > tOut) return -1;
+  }
+  return tIn;
+}
+
+// Ray vs a player's hitboxes. pl = { x, y, z, yaw, c, s?, id?, boxes? } (s = size scale, e.g. big zombies).
+// boxes: the target's posed boxes exactly as drawn this frame, [matrix array, offset, part] each (Holdout
+// zombies lean, nod, swing and fly — public/js/zombies.js) — tested instead of the upright hitboxes.
 // Returns { t, part, id } (closest) or null.
 export function rayPlayer(o, d, maxDist, pl) {
   const s = pl.s || 1, cy = Math.cos(pl.yaw), sy = Math.sin(pl.yaw);
@@ -157,8 +177,15 @@ export function rayPlayer(o, d, maxDist, pl) {
   // local space is scaled by 1/s, so a local hit distance maps back to world distance * s
   const lo = [(ox * cy - oz * sy) / s, (o[1] - pl.y) / s, (ox * sy + oz * cy) / s];
   const ld = [d[0] * cy - d[2] * sy, d[1], d[0] * sy + d[2] * cy];
-  if (!rayBox(lo, ld, [-0.6, 0, -0.8], [0.6, 2.0, 0.6])) return null;
+  if (!rayBox(lo, ld, [-1.1, -0.6, -1.4], [1.1, 2.1, 0.7])) return null; // roomy enough for any drawn pose
   let best = null;
+  if (pl.boxes) {
+    for (const [m, k, part] of pl.boxes) {
+      const t = rayDrawnBox(o, d, m, k);
+      if (t >= 0 && t <= maxDist && (!best || t < best.t)) best = { t, part, id: pl.id };
+    }
+    return best;
+  }
   for (const hb of hitboxes(pl.c || 0)) {
     const r = rayBox(lo, ld,
       [hb.c[0] - hb.h[0], hb.c[1] - hb.h[1], hb.c[2] - hb.h[2]],

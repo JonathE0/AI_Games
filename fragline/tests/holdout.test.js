@@ -186,7 +186,7 @@ test('endless: waves keep coming past wave 10, bosses rotate every 5 waves', () 
   room.zombies.clear();
   room.update(T += 33, 0.033);
   assert.equal(room.phase, 'intermission', 'wave 11 ends like any other');
-  assert.deepEqual([5, 10, 15, 20, 25, 30, 7].map(bossFor), ['sky', 'titan', 'maw', 'sky', 'titan', 'maw', null]);
+  assert.deepEqual([5, 10, 15, 20, 25, 30, 7].map(bossFor), ['sky', 'titan', 'maw', 'grave', 'behemoth', 'sky', null]);
   assert.ok(alphaWave(12) && !alphaWave(15) && !alphaWave(11));
   assert.ok(waveBudget(20, 1) > waveBudget(10, 1) && waveBudget(20, 1) < waveBudget(10, 1) * 3, 'steady growth after wave 10');
   room.startWave(WAVES + 2);

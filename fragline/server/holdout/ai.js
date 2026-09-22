@@ -67,7 +67,7 @@ function lobTarget(room, z) {
 function step(room, z, dt, now, hash) {
   const t = z.t, pos = z.pos;
   z.hist.push(now, pos[0], pos[1], pos[2]);
-  if (z.hist.length > 36) z.hist.splice(0, 4);
+  if (z.hist.length > 80) z.hist.splice(0, 4); // 1 s of positions for lag-compensated hit claims (room.js rayNearZombie)
   if (z.under) { stepBurrow(room, z, now); return; } // tunnelling
   if (z.escaping) { // Hoarder: sinking into its escape hole with the cash — no more moving or fighting
     const k = Math.min(1, (now - z.escaping.t0) / z.escaping.T);
@@ -139,6 +139,7 @@ function step(room, z, dt, now, hash) {
       } else if (dh <= t.reach && dy > -1.2) attack = { kind: 'p', ref: z.aggro };
       else goal = [pp[0], pp[2]];
     }
+    if (!attack && !goal && !face && z.lid) ({ attack, goal } = room.bosses.grave.seekLid(z, body)); // a Gravekeeper pit zombie: lids first
     if (!attack && !goal && !face) { // head for the Core (Spitters too, until something is in range)
       if (distToBox(body, room.coreBase) <= t.reach) attack = { kind: 'c' };
       else {
@@ -224,6 +225,7 @@ function strike(room, z) {
   const a = z.target, t = z.t, mul = room.director.dmgMul * (z.dmgMul ?? 1);
   z.target = null;
   if (!a) return;
+  if (t.sweep) return room.bosses.grave.sweep(z, a); // the Gravekeeper's scythe
   if (t.stomp) { // the Titan's stomp flattens everything around its feet
     for (const p of room.targets()) if (p.alive && !p.downed && Math.hypot(p.st.p[0] - z.pos[0], p.st.p[2] - z.pos[2]) <= t.stomp && p.st.p[1] - z.pos[1] < 3) room.hurtPlayer(p, t.dmg * mul, z);
     for (const s of room.builds()) if (distToBox([z.pos[0], z.pos[1] + 1, z.pos[2]], s.box) <= t.stomp) room.damagePiece(s, t.sdmg * mul * 0.5, z);
@@ -233,7 +235,8 @@ function strike(room, z) {
   }
   if (a.kind === 'p') {
     const p = a.ref, pp = p.st.p, dh = Math.hypot(pp[0] - z.pos[0], pp[2] - z.pos[2]), dy = pp[1] - z.pos[1];
-    if (p.alive && !p.downed && dh <= t.reach + 0.5 && dy > -1.2 && dy < 1.8 * z.s) { room.hurtPlayer(p, t.dmg * mul, z); onMeleeHit(room, z, p); }
+    if (p.alive && !p.downed && dh <= t.reach + 0.5 && dy > -1.2 && dy < 1.8 * z.s
+      && !room.barriers.stop([z.pos[0], z.pos[1] + 1, z.pos[2]], [pp[0], pp[1] + 1, pp[2]], t.dmg * mul, z)) { room.hurtPlayer(p, t.dmg * mul, z); onMeleeHit(room, z, p); } // a Tank's barrier (or a Ronin's Deflect) in between takes the swing
   } else if (a.kind === 's') {
     if (room.pieces.get(a.ref.id) === a.ref) {
       room.damagePiece(a.ref, t.sdmg * mul, z);
@@ -280,6 +283,8 @@ export function updateProjectiles(room, dt, now) {
     pr.vel[1] -= GLOB_GRAVITY * dt;
     for (let j = 0; j < 3; j++) pr.pos[j] += pr.vel[j] * dt;
     const b = pr.pos, d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], len = Math.hypot(...d);
+    const wall = room.barriers.stop(a, b, pr.dmg * room.director.dmgMul, room.zombies.get(pr.from), true); // splashes on a Tank's barrier (or a Deflect sends it back): nothing behind it gets hit
+    if (wall) { room.proj.splice(i, 1); room.broadcast({ t: 'splat', id: pr.id, p: wall.map(v => Math.round(v * 100) / 100), ...(pr.kind === 'ink' ? { ink: 1 } : {}) }); continue; }
     let hit = null;
     for (const p of room.targets()) {
       if (!p.alive || p.downed) continue;

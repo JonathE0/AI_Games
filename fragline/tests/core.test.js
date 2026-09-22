@@ -17,20 +17,31 @@ function join(room, name = 'P') {
 const started = room => { room.phase = 'prep'; return room; };
 const zombieAt = (room, x, z, type = 'shambler') => { const zb = room.spawnZombie(type, 'N'); zb.pos = [x, 0, z]; zb.hist = []; return zb; };
 
-test('the Core regenerates a little on its own, all the time, never past max', () => {
+test('the Core mends itself: 1%/s of max during breaks, 0.2%/s in a wave once it has gone 8 s unhit, never past max', () => {
   const room = started(new HoldoutRoom('CR', {}));
   room.phaseEnd = Infinity; // stays in 'prep' so update() doesn't advance into a wave
   join(room, 'A');
-  const max = room.core.max;
-  room.core.hp = max - 500;
-  const hp0 = room.core.hp;
+  const max = room.core.max, near = (got, want, what) => assert.ok(Math.abs(got - want) <= max * 0.0002, `${what}: +${got}, expected ~${want}`);
+  room.core.hp = max * 0.5;
   advance(room, 10000);
-  const gained = room.core.hp - hp0;
-  assert.ok(gained > 0, 'regenerated a little');
-  assert.ok(Math.abs(gained - max * 0.003) < 0.5, `expected ~0.03%/s of max (${max * 0.003}), got ${gained}`);
-  assert.ok(gained < max * 0.01, 'very slow: nowhere near 1% of max in 10s');
-  room.core.hp = max;
-  advance(room, 5000);
+  near(room.core.hp - max * 0.5, max * 0.1, 'a break: 10 s at 1%/s');
+
+  room.startWave(1); room.director.queue = [];
+  for (const z of [...room.zombies.values()]) room.removeZombie(z);
+  const keep = zombieAt(room, 44, 44); keep.frozenUntil = T + 1e9; keep.hp = keep.maxHp = 1e6; // keeps the wave going
+  room.core.hp = max * 0.5;
+  room.damageCore(10, null);
+  const hit = room.core.hp;
+  advance(room, 7900);
+  assert.equal(room.core.hp, hit, 'nothing within 8 s of a hit');
+  advance(room, 5100); // 13 s after it: 5 s of mending
+  near(room.core.hp - hit, max * 0.002 * 5, 'a wave: 5 s at 0.2%/s');
+  room.damageCore(10, null);
+  const hit2 = room.core.hp;
+  advance(room, 6000);
+  assert.equal(room.core.hp, hit2, 'every hit restarts the 8 s');
+  room.core.hp = max - 0.1;
+  advance(room, 9000);
   assert.equal(room.core.hp, max, 'never over max');
 });
 

@@ -7,7 +7,7 @@ import { OUTPOST, OUTPOST_STATIC, CORE_LADDERS } from '/shared/outpost.js';
 import { BMATS, MAT_IDS, REACH, distToBox, slotKey } from '/shared/build.js';
 import { WAVES } from '/shared/zombies.js';
 import { WEAPONS } from '/shared/weapons.js';
-import { RARITY, AMMO, ITEMS, POWERUPS, BUFF, THROWABLES, SURVIVOR, SURVIVOR_CLASSES, ARMOR, CLASSES, SMITH, CORE_UP_IDS, ADREN_CARRY } from '/shared/holdout.js';
+import { RARITY, AMMO, ITEMS, POWERUPS, BUFF, THROWABLES, SURVIVOR, SURVIVOR_CLASSES, ARMOR, CLASSES, SMITH, TURRET_TYPES, CORE_UP_IDS, BARRIER, adrenCarry, canBarrier } from '/shared/holdout.js';
 import { HOTBAR, INV_SIZE, SACK_SIZE, ARMOR_SLOTS, countIn, itemName, armorStats, stackMax, fits } from '/shared/items.js';
 import { SKY } from '/shared/skyboss.js';
 import { rayWorld, blocked, bodyHeight, topAt, dirFromAngles } from '/shared/physics.js';
@@ -19,7 +19,10 @@ import { NightFx } from './night.js';
 import { hotbarHTML, buyHTML, smithHTML, bankHTML, saveRecord, recordText } from './holdout_ui.js';
 import { InventoryUI } from './inventory_ui.js';
 import { Minimap } from './minimap.js';
-import { setText, setHTML, setClass, setStyle, setHidden, hudReset, keyName } from './hud.js';
+import { GravekeeperView } from './boss_gravekeeper.js';
+import { BehemothView } from './boss_behemoth.js';
+import { KatanaView } from './katana.js';
+import { setText, setHTML, setClass, setStyle, setHidden, hudReset, keyName, smartKey, smartRoute } from './hud.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
@@ -100,25 +103,29 @@ export class Holdout {
       task: null, shake: 0, bagAtChest: false, it: null, shopTab: 'shop', buyback: null, bankSel: null,
       teamUps: { vitality: 0, firepower: 0, engineering: 0, gunnery: 0 },
       coreLevel: 0, coreUps: Object.fromEntries(CORE_UP_IDS.map(id => [id, 0])),
-      nvManualOn: false, adrenUntil: 0, adrenPulseAt: 0, rallyUntil: 0, rallyK: 0,
+      nvManualOn: false, adrenUntil: 0, adrenPulseAt: 0, rallyUntil: 0, rallyK: 0, coreMendAt: 0,
+      bar: { want: false, blocked: false, hp: BARRIER.hp, cdUntil: 0 }, barrierUp: false,
     });
     this.tags = new Map();
     this.invUI = new InventoryUI(this);
     this.minimap = new Minimap(this);
+    this.gk = new GravekeeperView(this); // wave 20's boss: pits, bolts, ward, his bell and scythe
+    this.bhm = new BehemothView(this); // wave 25's boss: the walking fortress, its deck, hatch bolts and hearts
+    this.kat = new KatanaView(this); // the Ronin's katana: its moves, cooldown pips and effects
     this.refreshBoxes();
     this.enterDom();
     game.hud.banner('ZOMBIE HOLDOUT', `Build, harvest with ${this.keyOr('inspect')}, shop at the Core, then press ${this.keyOr('ready')} when ready`, '', 5000);
   }
 
   get building() { return this.build.active; }
-  // run speed on top of the weapon limit: class, Swift Step boots, the Slasher Blade in hand
+  // run speed on top of the weapon limit: class, Swift Step boots, the Slasher Blade in hand, a raised barrier
   get speedMult() {
     const st = this.as ?? (this.as = armorStats(this.armor)), slowed = this.pfx && this.g.now < this.pfx.slowUntil ? 1 - this.pfx.slow : 1;
-    return (CLASSES[this.cls]?.speed ?? 1) * (1 + st.speed) * (this.g.weapons.w?.speedBuff ?? 1) * slowed;
+    return (CLASSES[this.cls]?.speed ?? 1) * (1 + st.speed) * (this.g.weapons.w?.speedBuff ?? 1) * slowed * (this.barrierUp ? BARRIER.speed : 1);
   }
   get rateMult() { return (this.g.now < (this.buffs.rate || 0) ? BUFF.rate : 1) * (1 + 0.06 * (this.teamUps.gunnery || 0)); }
   get reloadMult() { return 1 + 0.1 * (this.teamUps.gunnery || 0); }
-  blocksShooting() { return this.build.active || this.edit.active || this.downed || !!this.carrying; }
+  blocksShooting() { return this.build.active || this.edit.active || this.downed || !!this.carrying || this.barrierUp; }
   targets() { return this.zombies.targets(); }
   skyTargets() { return this.ents.skyTargets(performance.now() / 1000); }
   balloonTargets() { return this.ents.balloonTargets(); }
@@ -129,7 +136,7 @@ export class Holdout {
 
   // Everything solid for you: the map, harvest nodes still standing, built pieces (doors open for players).
   refreshBoxes() {
-    this.boxes = [...OUTPOST_STATIC, ...this.props.boxes, ...this.nodes.boxes, ...this.structs.boxes];
+    this.boxes = [...OUTPOST_STATIC, ...this.props.boxes, ...this.nodes.boxes, ...this.structs.boxes, ...this.bhm.boxes];
     this.g.boxes = this.g.moveBoxes = this.boxes;
     for (const r of this.g.remotes.values()) r.boxes = this.boxes;
     this.shadowDirty = true;
@@ -137,6 +144,7 @@ export class Holdout {
 
   // Movement also collides with nearby zombie bodies (the horde can hem you in).
   moveBoxes() {
+    if (this.phys.dash?.left > 0) return this.boxes; // the katana dash cuts through the horde
     const p = this.g.player.pos, near = this.zombies.boxesNear(p[0], p[2], 3, []);
     return near.length ? this.boxes.concat(near) : this.boxes;
   }
@@ -144,7 +152,7 @@ export class Holdout {
   placementWorld() {
     const trapped = [...this.ents.defs.values()].filter(d => d.side === 0).map(d => this.structs.list.get(d.pid)).filter(Boolean);
     return {
-      slots: this.structs.slots, pieces: [...this.structs.list.values()].flatMap(p => p.boxes), statics: [...OUTPOST_STATIC, ...this.props.boxes], nodes: this.nodes.boxes,
+      slots: this.structs.slots, pieces: [...this.structs.list.values()].flatMap(p => p.boxes), statics: [...OUTPOST_STATIC, ...this.props.boxes, ...this.bhm.boxes], nodes: this.nodes.boxes,
       zombies: this.zombies.targets(), eye: this.g.player.eye, mats: this.mats, core: OUTPOST.core, zone: OUTPOST.zone, trapped: new Set(trapped.map(slotKey)),
     };
   }
@@ -186,7 +194,7 @@ export class Holdout {
       case 'proj': return this.addGlob(m);
       case 'splat': return this.splat(m);
       case 'hphase': return this.onPhase(m);
-      case 'hstat': this.left = m.left; this.core = m.core; return;
+      case 'hstat': if (m.core[0] > this.core[0]) this.coreMendAt = this.g.now; this.left = m.left; this.core = m.core; return; // rising: pulse the Core bar
       case 'coreHit': return this.onCoreHit(m);
       case 'pdown': return this.onDown(m);
       case 'prev': return this.onRevived(m);
@@ -206,7 +214,7 @@ export class Holdout {
       case 'sddel': if (m.opened) { const d = this.ents.drops.get(m.id); if (d) this.world.burst([d.x, d.y + 1, d.z], [0, 1, 0], 0x6fb8ff, 24, 4); } return this.ents.removeDrop(m.id);
       case 'dadd': for (const t of m.l) this.ents.addDef(t); return;
       case 'dall': return this.ents.setDefs(m.l);
-      case 'ddel': return this.ents.removeDef(m.id);
+      case 'ddel': this.ents.removeDef(m.id); if (this.g.ui === 'smith') this.renderSmith(); return;
       case 'dfx': return this.ents.defFx(m.l, this.zombies);
       case 'corefx': return this.ents.coreFx(m.l, this.zombies);
       case 'thr': return this.ents.addThrown(m);
@@ -215,6 +223,7 @@ export class Holdout {
       case 'slam': return this.ents.slamFx(m);
       case 'bite': return this.ents.biteFx(m);
       case 'arc': return this.ents.arcFx(m.a, m.b);
+      case 'etip': return this.explosiveTip(m.p);
       case 'zaim': this.ents.laser(m.id, m.a, m.p, m.ms, this.nightK > 0.3); { const z = this.zombies.list.get(m.id); if (z) this.g.sound.play('scope', { pos: z.pos, vol: 1, ref: 8, rate: 0.7 }); } return;
       case 'gsmash': { this.ents.golemSmash(m.p); const d = Math.hypot(m.p[0] - this.g.player.pos[0], m.p[2] - this.g.player.pos[2]); if (d < 12) this.shake = Math.max(this.shake, 1 - d / 12); return; }
       case 'zshot': this.g.world.tracer(m.a, m.b, 0xff4040); this.g.sound.play('shot_awp', { pos: m.a, vol: 1.3, ref: 12, roll: 0.6 }); return;
@@ -223,13 +232,15 @@ export class Holdout {
       case 'hoardcash': this.world.burst(m.p, [0, 1, 0], 0xffd700, 40, 6); this.g.sound.play('cash', { pos: m.p, vol: 1 }); this.g.hud.banner('HOARDER DOWN', `+$${m.amt} for the squad!`, 'win', 3500); return;
       case 'hz': return this.ents.addHazard(m);
       case 'maw': this.onMaw(m); return;
+      case 'grave': return this.gk.onMsg(m);
+      case 'bhm': return this.bhm.onMsg(m);
       case 'thump': return this.ents.setThumpers(m.l);
       case 'stomp': { this.ents.stomp(m); const d = Math.hypot(m.p[0] - this.g.player.pos[0], m.p[2] - this.g.player.pos[2]); if (d < 18) this.shake = Math.max(this.shake, 1 - d / 18); return; }
       case 'boss': return this.onBoss(m);
       case 'berserk': return this.onBerserk(m);
       case 'smith': this.smithOn = !!m.on; if (m.on) this.ents.smithShow(SMITH); return;
       case 'ping': this.minimap.onPing(m); return;
-      case 'dmod': { const d = this.ents.defs.get(m.id); if (d) Object.assign(d, { mods: m.mods, ammo: m.ammo }); if (this.g.ui === 'smith') this.renderSmith(); return; }
+      case 'dmod': { const d = this.ents.defs.get(m.id); if (d) { Object.assign(d, { mods: m.mods, ammo: m.ammo, hp: m.hp }); this.ents.defMods(d); } if (this.g.ui === 'smith') this.renderSmith(); return; }
       case 'pfx': return this.onEffects(m);
       case 'boom': this.shake = Math.max(this.shake, this.ents.boom(m, this.g.player.eye)); return;
       case 'svadd': return this.ents.svAdd(m.id, m.name, m.tier ?? 0, m.cls);
@@ -241,6 +252,8 @@ export class Holdout {
       case 'skyback': this.ents.skyBack(m.i); return;
       case 'task': this.task = { text: m.text, until: this.g.now + 14 }; this.g.hud.banner('NEW TASK', m.text, '', 4500); this.g.sound.play('round_start', { vol: 0.5 }); return;
       case 'coreheal': this.coreHealer = m.id; return;
+      case 'bar': return this.onBarrier(m);
+      case 'kat': return this.kat.onMsg(m);
       case 'vit': {
         const dHp = m.hp - this.g.me.hp, dSh = m.sh - this.shield;
         this.g.me.hp = m.hp; this.shield = this.g.me.armor = m.sh; // me.armor is the HUD's SHIELD number
@@ -349,7 +362,7 @@ export class Holdout {
       hud.banner('FORTIFY THE CORE', `Build, harvest and shop — wave 1 comes from ${names(m.next)} in ${Math.round(m.endsIn / 1000)}s`, '', 5000);
       this.g.sound.play('wave_horn', { vol: 0.5, rate: 1.2 });
     } else if (m.phase === 'wave' && prev !== 'wave') {
-      const boss = { sky: 'THE COLOSSUS WAVE', titan: 'TWO BROOD TITANS WAVE', maw: 'THE MAW WAVE' }[m.boss];
+      const boss = { sky: 'THE COLOSSUS WAVE', titan: 'TWO BROOD TITANS WAVE', maw: 'THE MAW WAVE', grave: 'THE GRAVEKEEPER WAVE', behemoth: 'THE BEHEMOTH WAVE' }[m.boss];
       hud.banner(boss ?? `WAVE ${m.wave}`, `${m.night ? 'NIGHT · ' : ''}Incoming: ${names(m.lanes)}`, 'lose', 3500);
       this.g.sound.play('wave_horn', { vol: 0.9 });
     } else if (m.phase === 'intermission' && prev === 'wave') {
@@ -359,7 +372,8 @@ export class Holdout {
       hud.banner('MAP RESET', `New match — press ${this.keyOr('ready')} when ready`, '', 4000); // the stats panel stays up until the next game starts
     }
     if (m.phase === 'countdown') $('hoEnd').hidden = true;
-    if (m.phase !== 'wave') this.ents.skyEnd();
+    if (m.phase !== 'wave') { this.ents.skyEnd(); this.gk.clear(); }
+    if (m.phase !== 'wave' && this.bhm.alive) this.bhm.clear(); // the Core fell with it still standing
     const st = {};
     for (const id of m.next) st[id] = 1;
     for (const id of m.lanes) st[id] = 2;
@@ -390,12 +404,17 @@ export class Holdout {
       reviveId: null, coreHealer: null, shake: 0, respawnAt: 0, spectate: null, it: null, buyback: null, bankSel: null,
       teamUps: { vitality: 0, firepower: 0, engineering: 0, gunnery: 0 },
       coreLevel: 0, coreUps: Object.fromEntries(CORE_UP_IDS.map(id => [id, 0])),
-      adrenUntil: 0, adrenPulseAt: 0, rallyUntil: 0, rallyK: 0,
+      adrenUntil: 0, adrenPulseAt: 0, rallyUntil: 0, rallyK: 0, coreMendAt: 0,
+      bar: { want: false, blocked: false, hp: BARRIER.hp, cdUntil: 0 }, barrierUp: false,
     });
     if (this.g.ui === 'bag') this.closeBag();
     if (this.g.ui === 'smith') this.closeSmith();
     if (this.g.ui === 'bank') this.closeBank();
     this.minimap.reset();
+    this.gk.clear();
+    this.bhm.clear();
+    this.kat.reset();
+    this.phys.dash = null;
     this.smithOn = false;
     $('skyBackMark').hidden = true;
     $('deathCam').hidden = true;
@@ -471,7 +490,7 @@ export class Holdout {
     const weapon = WEAPONS[m.w] ? m.w : ITEMS[m.w]?.name ?? (/^sv\d$/.test(m.w) ? SURVIVOR.tiers[+m.w[2]]?.gun : m.w);
     this.g.hud.kill(who, zb.t.name, weapon, m.hs, false, mine);
     if (mine && !m.hs) this.g.sound.play('kill', { vol: 0.35 });
-    if (zb.t.boss) this.g.hud.banner('ALPHA BRUTE DOWN', `${who} landed the final blow · loot dropped`, 'win', 3000);
+    if (zb.t.boss) this.g.hud.banner(`${zb.t.name.toUpperCase()} DOWN`, `${who} landed the final blow · loot dropped`, 'win', 3000);
   }
 
   onZombieEvent(kind, zb) {
@@ -614,6 +633,7 @@ export class Holdout {
   // Returns true when the swing hit a tree/rock/wreck/crate, a map prop or a built piece (the server decides
   // whose pieces you may break).
   harvestSwing(eye, dir, reach) {
+    if (this.bhm.swing(eye, dir, reach)) return true; // a bolt on one of the Behemoth's hatches
     const hit = rayWorld(eye, dir, reach, [...this.nodes.boxes, ...this.props.boxes, ...this.structs.boxes]);
     if (hit?.box.sid !== undefined) {
       if (this.phase === 'lobby' || this.phase === 'countdown') { this.say('Wait for the game to start before breaking things'); return false; }
@@ -717,15 +737,22 @@ export class Holdout {
 
   // ---------- input ----------
   // Returns true when the action was used by the Holdout (build/edit mode, hotbar, items, E, ready…).
-  onAction(act) {
+  onAction(act, code) {
     const b = this.build, e = this.edit, g = this.g, pl = g.player, W = g.weapons;
     if (act === 'ready') { this.toggleReady(); return true; }
+    if ((act === 'interact' || act === 'backpack') && smartKey(g.hud.settings.binds, code)) { // one key for Use and Inventory
+      if (smartRoute(false, pl.alive && !this.downed ? this.interactTarget() : null) === 'use') this.pressInteract(); // holds run from interact()
+      else this.openBag(false);
+      return true;
+    }
     if (act === 'backpack') { this.openBag(false); return true; }
     if (act === 'map') { this.minimap.toggle(true); return true; }
-    const needsBody = ['edit', 'interact', 'throw', 'nextThrow', 'slot4', 'slot5', 'slot6', 'adrenaline', 'sack1', 'sack2', 'sack3', 'sack4'];
+    const needsBody = ['edit', 'interact', 'throw', 'nextThrow', 'slot4', 'slot5', 'slot6', 'dash', 'adrenaline', 'sack1', 'sack2', 'sack3', 'sack4', 'turretUp'];
     if (!pl.alive && act === 'fire') { this.cycleSpectate(); return true; }
     if (!pl.alive || this.downed) return needsBody.includes(act) || (this.downed && ['primary', 'secondary', 'knife', 'lastWeapon', 'prevWeapon', 'nextWeapon', 'reload', 'inspect', 'alt', 'jump'].includes(act));
+    if (act === 'dash') { this.kat.dash(); return true; } // the Ronin's katana dash (anything else: nothing)
     if (act === 'interact') return this.pressInteract();
+    if (act === 'turretUp') { this.openTurret(); return true; }
     if (PIECE_KEYS[act]) { b.select(PIECE_KEYS[act]); return true; } // no build mode: a piece key builds from anywhere
     if (act === 'edit') { b.toggle(false); e.toggle(); return true; }
     if (act === 'throw') { this.throwItem(); return true; }
@@ -759,6 +786,7 @@ export class Holdout {
         default: return false;
       }
     }
+    if (W.id === 'katana' && (act === 'alt' || act === 'reload')) { if (act === 'alt') this.kat.strike(); else this.kat.deflect(); return true; } // Fire Strike, Deflect
     const slot = { primary: 1, secondary: 2, knife: 3, slot4: 4, slot5: 5, slot6: 6, inspect: 0 }[act];
     // hotbar: 1-6 (guns or items), the harvest tool key = harvesting knife (again while holding it: inspect)
     if (act === 'inspect' && W.slot === W.knifeSlot) { W.inspect(); return true; }
@@ -793,13 +821,43 @@ export class Holdout {
   // Use whatever sits in sack slot `idx` (0-3) — only Adrenaline Shots go in there.
   useSackSlot(idx) { if (this.sack[idx]?.kind === 'adrenaline') this.useAdrenaline(); }
 
+  // ---------- the Tank's barrier (server/holdout/barrier.js) ----------
+  // Right-click held with a barrier gun: tell the server whenever that changes and show it at once (it corrects us).
+  // After it breaks (or the server refuses) it stays down until you let go and raise it again.
+  updateBarrier() {
+    const g = this.g, b = this.bar, was = this.barrierUp;
+    const want = this.cls === 'tank' && canBarrier(g.weapons.id) && g.held('alt') && !g.ui && g.input.locked && g.player.alive
+      && !this.downed && !this.carrying && !this.build.active && !this.edit.active;
+    if (want !== b.want) {
+      b.want = want;
+      b.blocked = want && g.now < b.cdUntil; // still recharging after a break
+      if (!b.blocked) g.net.send({ t: 'bar', on: want, w: g.weapons.id });
+    }
+    this.barrierUp = want && !b.blocked;
+    if (this.barrierUp !== was) g.sound.play(this.barrierUp ? 'zap' : 'tick', { vol: 0.45, rate: this.barrierUp ? 0.55 : 1.3 });
+    this.ents.setBarrier(g.me.id, this.barrierUp, b.hp / BARRIER.hp, true);
+  }
+
+  // { id, up, hp, cd (ms until it can go up again), broke, no (your raise was refused) }
+  onBarrier(m) {
+    const b = this.bar, mine = m.id === this.g.me.id, pos = mine ? this.g.player.pos : this.g.remotes.get(m.id)?.pos;
+    if (mine) {
+      Object.assign(b, { hp: m.hp, cdUntil: this.g.now + (m.cd || 0) / 1000 });
+      if ((m.broke || m.no) && b.want) b.blocked = true; // let go and raise it again (a plain 'down' may just be a stale echo)
+    } else this.ents.setBarrier(m.id, !!m.up, m.hp / BARRIER.hp);
+    if (m.broke && pos) {
+      this.g.sound.play('break_Z', { pos, vol: 1.1, ref: 4, rate: 1.3 });
+      this.world.burst([pos[0], pos[1] + 1.4, pos[2]], [0, 1, 0], 0x8fe8ff, 30, 5);
+    }
+  }
+
   // Would a ground item pickup actually go somewhere? Mirrors the server's take(): guns/armor/anything else
   // with a stack size of 1 always succeeds by swapping into your held hotbar slot, so only a full stack of a
   // stackable consumable/trap/deployable can fail (sack full for consumables, then the backpack full too).
   pickupFits(pk) {
     const it = { id: pk.key, kind: pk.ik, n: pk.n, r: pk.r, tier: pk.t, el: pk.el };
-    if (it.kind === 'adrenaline' && this.items.adrenaline >= ADREN_CARRY) return false;
-    if (fits(this.inv, this.sack, it)) return true;
+    if (it.kind === 'adrenaline' && this.items.adrenaline >= adrenCarry(this.cls)) return false;
+    if (fits(this.inv, this.sack, it, this.cls)) return true;
     return stackMax(it) === 1 && !this.heldItem()?.locked; // a full inventory swaps with what you hold — never a locked item
   }
 
@@ -903,12 +961,15 @@ export class Holdout {
   renderBag() { this.invUI.render(); }
 
   // ---------- Blacksmith panel ----------
-  openSmith() {
+  // turret: a turret id opens just that turret's upgrades (the "Upgrade turret" key, no Blacksmith needed)
+  openSmith(turret = null) {
     const g = this.g;
     if (g.ui || !g.player.alive) return;
     g.ui = 'smith';
+    this.smithTurret = turret;
     $('smithMenu').hidden = false;
-    $('smithKey').textContent = this.key('interact');
+    $('smithMenu').querySelector('h2').textContent = turret ? 'TURRET UPGRADES' : 'THE BLACKSMITH';
+    $('smithKey').textContent = this.key(turret ? 'turretUp' : 'interact');
     this.renderSmith();
     if (g.input.locked) g.setVCursor(innerWidth / 2, innerHeight / 2);
   }
@@ -917,8 +978,32 @@ export class Holdout {
     const g = this.g;
     if (g.ui !== 'smith') return;
     g.ui = null;
+    this.smithTurret = null;
     $('smithMenu').hidden = true;
     g.setVCursor(null);
+  }
+
+  // the closest turret within SMITH.turretReach (the server checks the same distance)
+  nearTurret() {
+    const me = this.g.player.pos;
+    let best = null, bd = SMITH.turretReach;
+    for (const d of this.ents.defs.values()) {
+      const dist = Math.hypot(d.pos[0] - me[0], d.pos[2] - me[2]);
+      if (TURRET_TYPES.includes(d.type) && dist <= bd && Math.abs(d.pos[1] - me[1]) < 3) { bd = dist; best = d; }
+    }
+    return best;
+  }
+
+  openTurret() {
+    const d = this.nearTurret();
+    if (d) this.openSmith(d.id);
+    else this.say(`Stand within ${SMITH.turretReach} m of a turret to upgrade it`);
+  }
+
+  // Explosive tips (gun mod) went off: a small burst, the pop rate-limited so an SMG doesn't drown everything out
+  explosiveTip(p) {
+    this.world.burst(p, [0, 1, 0], 0xffa23a, 8, 3);
+    if (this.g.now - (this.etipAt || 0) > 0.12) { this.etipAt = this.g.now; this.g.sound.play('explode', { pos: p, vol: 0.25, rate: 1.9, ref: 2 }); }
   }
 
   renderSmith() {
@@ -1002,8 +1087,12 @@ export class Holdout {
     this.structs.tick(dt, people);
     this.nodes.update(dt);
     this.updateGlobs(dt);
-    this.ents.update(dt, pnow, { me: g.player.pos, meId: g.me.id, remotes: g.remotes });
+    this.updateBarrier();
+    this.kat.update(dt);
+    this.ents.update(dt, pnow, { me: g.player.pos, meYaw: g.player.yaw, meId: g.me.id, remotes: g.remotes });
     this.ents.updateSpecials(dt, this.zombies);
+    this.gk.update(dt);
+    this.bhm.update(dt);
     this.minimap.update();
     const fx = this.pfx, blind = fx && now < fx.blindUntil ? Math.min(1, (fx.blindUntil - now) / 1.2) : 0, burn = fx && now < fx.burnUntil ? 0.55 + 0.25 * Math.sin(now * 12) : 0;
     setStyle('fxBlind', 'opacity', blind.toFixed(2));
@@ -1120,7 +1209,7 @@ export class Holdout {
       return `${status}${look}`;
     }
     if (this.it) return this.it.text;
-    if ((this.phase === 'lobby' || this.phase === 'countdown') && !this.cls) return `Pick a class: press ${this.keyOr('buy')} at the Core (Tank · Assault · Medic) · then ${this.keyOr('ready')} when ready`;
+    if ((this.phase === 'lobby' || this.phase === 'countdown') && !this.cls) return `Pick a class: press ${this.keyOr('buy')} at the Core (Tank · Assault · Ronin) · then ${this.keyOr('ready')} when ready`;
     if (this.phase === 'lobby' || this.phase === 'countdown') return `Waiting for the squad — press ${this.keyOr('ready')} when ready · building and harvesting open when the game starts${this.canBuy() ? ` · ${this.keyOr('buy')} shop` : ''}`;
     if (this.phase === 'prep') return `Get ready: build with ${['bWall', 'bFloor', 'bStair', 'bCone'].map(id => this.key(id)).join(' ')} · ${this.keyOr('inspect')} harvest · ${this.keyOr('buy')} shop at the Core · ${this.keyOr('ready')} to start wave 1 early`;
     if (this.phase === 'intermission') return `Rebuild, repair and restock · ${this.keyOr('ready')} to skip the break${this.canBuy() ? ` · ${this.keyOr('buy')} to shop` : ''}`;
@@ -1138,8 +1227,18 @@ export class Holdout {
     setStyle('hoCoreFill', 'width', `${(frac * 100).toFixed(1)}%`);
     setClass('hoCore', 'low', frac < 0.3);
     setClass('hoCore', 'shielded', barrier);
+    setClass('hoCore', 'mending', now - this.coreMendAt < 0.9);
     const healer = this.coreHealer && this.roster.find(p => p.id === this.coreHealer);
     setText('hoCoreText', `CORE ${c} / ${cm}${barrier ? ' · BARRIER' : ''}${healer ? ` · ${healer.name} healing` : ''}`);
+    // the Tank's barrier while you hold right-click: its HP, or why it's down
+    const bar = this.bar;
+    setHidden('hoBarrier', !bar.want);
+    if (bar.want) {
+      const cd = bar.cdUntil - now;
+      setClass('hoBarrier', 'down', !this.barrierUp);
+      setStyle('hoBarrierFill', 'width', `${(Math.max(0, Math.min(1, bar.hp / BARRIER.hp)) * 100).toFixed(1)}%`);
+      setText('hoBarrierText', cd > 0 ? `BARRIER BROKEN · ${Math.ceil(cd)}s` : this.barrierUp ? `BARRIER ${Math.round(bar.hp)} / ${BARRIER.hp}` : 'BARRIER DOWN · let go and raise it again');
+    }
     const left = Math.max(0, this.end - now);
     const waveLeft = this.waveEnd ? Math.max(0, this.waveEnd - now) : 0;
     const berserkSoon = ph === 'wave' && waveLeft > 0 && waveLeft <= 60; // last minute: show the clock instead of the zombie count
@@ -1147,6 +1246,7 @@ export class Holdout {
     setText('hoLeft', berserkSoon ? 'TILL BERSERK' : ph === 'wave' ? 'ZOMBIES LEFT' : ph === 'lobby' ? 'NO TIMER' : ph === 'countdown' ? 'STARTING' : ph === 'prep' ? 'UNTIL WAVE 1' : ph === 'intermission' ? 'UNTIL NEXT WAVE' : 'NEXT MATCH');
     setText('matZink', this.mats.zink);
     setHTML('hotbar', hotbarHTML(this));
+    this.kat.hud();
     const flash = this.hasFlashlight();
     setHidden('hoFlash', !flash);
     if (flash) { setText('hoFlash', `FLASHLIGHT ${this.flashOn ? 'ON' : 'OFF'} · ${this.key('flashlight')}`); setClass('hoFlash', 'on', this.flashOn); }
@@ -1171,7 +1271,8 @@ export class Holdout {
     }).join(''));
     // boss bar
     const k = this.ents.sky, mw = this.ents.maw, titans = [...this.zombies.list.values()].filter(z => z.type === 'titan' && !z.dead);
-    setHidden('hoBoss', !((k && !k.dead) || mw || titans.length));
+    const gk = this.gk.bar() ?? this.bhm.bar(); // the Gravekeeper's or the Behemoth's { name, frac }
+    setHidden('hoBoss', !((k && !k.dead) || mw || titans.length || gk));
     if (k && !k.dead) {
       const alive = k.hp.filter(h => h > 0).length, sum = k.hp.reduce((a, b) => a + Math.max(0, b), 0);
       setText('hoBossName', `THE COLOSSUS · weak points ${alive}/${k.hp.length}`);
@@ -1184,6 +1285,9 @@ export class Holdout {
       const totalMax = titans.reduce((s, t) => s + t.maxHp, 0), totalHp = titans.reduce((s, t) => s + t.hp * t.maxHp, 0);
       setText('hoBossName', titans.length > 1 ? `THE BROOD TITANS (${titans.length})` : 'THE BROOD TITAN');
       setStyle('hoBossFill', 'width', `${((totalHp / totalMax) * 100).toFixed(1)}%`);
+    } else if (gk) {
+      setText('hoBossName', gk.name);
+      setStyle('hoBossFill', 'width', `${(gk.frac * 100).toFixed(1)}%`);
     }
     // buffs + task
     const chips = [['damage', 'DAMAGE +30%'], ['rate', 'RAPID FIRE'], ['barrier', 'CORE BARRIER']].filter(([key]) => now < (this.buffs[key] || 0)).map(([key, label]) => `<span>${label} ${Math.ceil(this.buffs[key] - now)}s</span>`);
@@ -1201,7 +1305,7 @@ export class Holdout {
     }
     // progress ring: reviving, holding E, or bleeding out
     let ring = null;
-    if (this.reviveId) ring = [Math.min(1, (now - this.reviveStart) / (CLASSES[this.cls]?.revive ? 1.5 : 3)), `REVIVING ${g.name(this.reviveId).toUpperCase()}`, 'var(--accent2)'];
+    if (this.reviveId) ring = [Math.min(1, (now - this.reviveStart) / 3), `REVIVING ${g.name(this.reviveId).toUpperCase()}`, 'var(--accent2)'];
     else if (this.thumpId !== null && this.thumpId !== undefined) ring = [Math.min(1, (now - this.reviveStart) / 5), 'ARMING THUMPER', '#5dff7a'];
     else if (this.hold) ring = [Math.min(1, (now - this.hold.start) / this.hold.it.hold), this.hold.it.kind === 'carry' ? 'PICKING UP' : 'OPENING', 'var(--gold)'];
     else if (this.downed) ring = [Math.max(0, (this.bleedEnd - now) / 30), 'DOWNED', 'var(--accent)'];
@@ -1318,6 +1422,7 @@ export class Holdout {
     this.closeBag();
     this.closeSmith();
     this.closeBank();
+    this.bhm.clear(); // first: it hands its collision box back through refreshBoxes
     this.zombies.dispose();
     this.structs.dispose();
     this.props.dispose();
@@ -1326,6 +1431,8 @@ export class Holdout {
     this.build.dispose();
     this.edit.dispose();
     this.ents.dispose();
+    this.gk.dispose();
+    this.kat.dispose();
     this.invUI.dispose();
     this.minimap.dispose();
     this.clearGlobs();
@@ -1342,7 +1449,7 @@ export class Holdout {
     this.nightFx.dispose();
     this.world.setLanes({});
     $('hud').classList.remove('coop', 'downed');
-    for (const id of ['hoTop', 'compass', 'team', 'mats', 'buildBar', 'revive', 'hoAlert', 'hoEnd', 'hotbar', 'hoBoss', 'hoTask', 'hoFlash', 'hoNV', 'bagMenu', 'smithMenu', 'bankMenu', 'minimap', 'mapWrap', 'skyBackMark']) $(id).hidden = true;
+    for (const id of ['hoTop', 'compass', 'team', 'mats', 'buildBar', 'revive', 'hoAlert', 'hoEnd', 'hotbar', 'hoBoss', 'hoTask', 'hoFlash', 'hoNV', 'bagMenu', 'smithMenu', 'bankMenu', 'minimap', 'mapWrap', 'skyBackMark', 'hoBarrier', 'hoKat']) $(id).hidden = true;
     $('hoFeed').innerHTML = '';
     $('hoBuffs').innerHTML = '';
     if (this.sbHead) $('scoreboard').querySelector('thead').innerHTML = this.sbHead;

@@ -235,6 +235,7 @@ export class Weapons {
 
     if (w.cat === 'item') return; // held grenades / adrenaline shots / traps are used by the Holdout controller
     if (w.cat === 'melee') {
+      if (w.id === 'katana') { if (input.fire && now >= this.nextFire) g.holdout?.kat.swing(); return; } // the Ronin's combo (katana.js); RMB is Fire Strike
       if (now >= this.nextFire && (input.fire || input.alt)) this.knife(!input.fire);
       return;
     }
@@ -297,14 +298,18 @@ export class Weapons {
     }
     const target = g.shotTargets(), sky = w.cat === 'sniper' ? g.holdout?.skyTargets() : null, balloons = g.holdout?.balloonTargets(), maw = g.holdout?.mawTargets();
     const dirs = [], ends = [], hits = [], skyHits = [], bal = [], mawHits = [];
+    const bhm = g.holdout?.bhm, bhmHits = []; // the Behemoth: its open reactor hearts take rounds, the rest of it is IMMUNE
+    // Blacksmith gun mods: Multishot fires one more round (k = pellets) a little off the aim; Piercing rounds go on into
+    // the next zombie behind (the server scales both down, see room.js onShot)
+    const mods = this.cur.item?.mods ?? [], shots = w.pellets + (mods.includes('multi') ? 1 : 0), pierceMod = !w.pierce && mods.includes('pierce');
     let heard = false;
-    for (let k = 0; k < w.pellets; k++) {
+    for (let k = 0; k < shots; k++) {
       let yaw = baseYaw, pitch = basePitch;
       const r = Math.random() * inacc * DEG, th = Math.random() * 6.2832;
       yaw += Math.cos(th) * r;
       pitch += Math.sin(th) * r;
-      if (w.pellets > 1) {
-        const r2 = Math.sqrt(Math.random()) * w.pelletSpread * DEG, th2 = Math.random() * 6.2832;
+      if (w.pellets > 1 || k >= w.pellets) {
+        const r2 = Math.sqrt(Math.random()) * (w.pelletSpread ?? 1.2) * DEG, th2 = Math.random() * 6.2832;
         yaw += Math.cos(th2) * r2;
         pitch += Math.sin(th2) * r2;
       }
@@ -322,6 +327,7 @@ export class Weapons {
         if (tg >= 0 && tg < endT) { mawHits.push([k, 'g']); endT = tg; g.world.burst(at(tg), [0, 1, 0], 0xff5a8a, 6, 3); }
         else if (tb >= 0 && tb < endT) { mawHits.push([k, 'b']); endT = tb; }
       }
+      if (bhm) endT = bhm.trace(eye, d, endT, k, bhmHits);
       const end = at(endT);
       if (endT === tr.endT) {
         for (const im of tr.impacts) {
@@ -332,6 +338,15 @@ export class Weapons {
         if (tr.player) {
           hits.push({ part: tr.player.part, pen: r3(tr.player.pen), id: tr.player.id, k }); // k: pellet (its direction is d[k])
           g.world.blood(end, d, tr.player.part === 'head');
+          if (pierceMod && Array.isArray(target)) { // the nearest zombie behind this one, short of a wall
+            const wallEnd = traceBullet(eye, d, 400, g.boxes, null, w.wallPen).endT;
+            let next = null;
+            for (const tg of target) {
+              const r = tg.id !== tr.player.id && rayPlayer(eye, d, wallEnd, tg);
+              if (r && r.t > tr.endT && (!next || r.t < next.t)) next = r;
+            }
+            if (next) { hits.push({ part: next.part, pen: r3(tr.player.pen), id: next.id, k }); g.world.blood(at(next.t), d, next.part === 'head'); }
+          }
         }
       }
       if (w.pierce && Array.isArray(target) && target.length) { // Skybreaker: every zombie along the line, up to where a wall stops it
@@ -364,6 +379,7 @@ export class Weapons {
     if (skyHits.length) msg.sky = skyHits;
     if (bal.length) msg.bal = bal;
     if (mawHits.length) msg.maw = mawHits;
+    if (bhmHits.length) msg.bhm = bhmHits;
     g.net.send(msg);
 
     if (w.bolt) { // bolt-action: drop out of scope, re-zoom when the bolt is cycled

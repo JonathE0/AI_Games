@@ -21,10 +21,11 @@ test('each preset binds every action exactly once, and walk / demolish / heal / 
   for (const id of ['bWall', 'bFloor', 'bStair', 'bCone', 'bTrap', 'bDeploy', 'bRotate']) assert.ok(BUILD_ACTIONS.has(id), id);
 });
 
-test('no key does two things in either preset — only Rotate (building only) may share one', () => {
+test('no key does two things in either preset — only Rotate (building only) and the Ronin\'s dash (on hotbar slot 4) may share one', () => {
   for (const [name, binds] of Object.entries(PRESETS)) {
-    const codes = ids.filter(id => id !== 'bRotate').flatMap(id => binds[id]).filter(Boolean);
+    const codes = ids.filter(id => id !== 'bRotate' && id !== 'dash').flatMap(id => binds[id]).filter(Boolean);
     assert.deepEqual(codes.filter((c, i) => codes.indexOf(c) !== i), [], name);
+    assert.deepEqual(binds.dash, binds.slot4, `${name}: the dash sits on hotbar slot 4's key`);
   }
   assert.deepEqual([PRESETS.right.bRotate[0], PRESETS.right.reload[0]], ['KeyR', 'KeyR'], 'R rotates while building, reloads otherwise');
 });
@@ -33,16 +34,17 @@ test('the right-handed preset matches the Fortnite-style layout; left-handed mov
   const first = b => Object.fromEntries(Object.entries(b).map(([id, c]) => [id, c[0]]));
   assert.deepEqual(first(PRESETS.right), {
     forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD', jump: 'Space', crouch: 'ControlLeft', fire: 'Mouse0', alt: 'Mouse2',
-    reload: 'KeyR', inspect: 'KeyX', primary: 'Digit1', secondary: 'Digit2', knife: 'Digit3', slot4: 'Digit4', slot5: 'Digit5', slot6: 'Digit6',
+    reload: 'KeyR', inspect: 'KeyX', primary: 'Digit1', secondary: 'Digit2', knife: 'Digit3', slot4: 'Digit4', slot5: 'Digit5', slot6: 'Digit6', dash: 'Digit4',
     lastWeapon: '', nextWeapon: 'WheelDown', prevWeapon: 'WheelUp', buy: 'KeyB', scoreboard: 'Tab', chat: 'Enter', edit: 'KeyG',
     interact: 'KeyE', ready: 'KeyY', throw: 'KeyT', nextThrow: 'KeyN', adrenaline: 'KeyH', sack1: 'Digit7', sack2: 'Digit8', sack3: 'Digit9',
     sack4: 'Digit0', flashlight: 'KeyL', backpack: 'KeyI', map: 'KeyM', bWall: 'KeyQ', bFloor: 'KeyF', bStair: 'KeyC', bCone: 'ShiftLeft',
-    bTrap: 'KeyZ', bDeploy: 'KeyV', bRotate: 'KeyR',
+    bTrap: 'KeyZ', bDeploy: 'KeyV', bRotate: 'KeyR', turretUp: 'KeyU',
   });
   assert.ok(Object.values(PRESETS.right).every(c => !c[1]), 'no alternates (crouch is Ctrl only)');
   const L = first(PRESETS.left);
   assert.deepEqual([L.bWall, L.bFloor, L.bStair, L.bCone, L.bTrap, L.bDeploy, L.bRotate, L.edit, L.ready, L.map],
     ['KeyP', 'KeyM', 'Comma', 'Period', 'KeyT', 'KeyH', 'KeyR', 'KeyJ', 'KeyR', 'KeyZ']);
+  assert.equal(L.turretUp, 'Quote', 'Upgrade turret: U right-handed, Quote left-handed');
 });
 
 test('hotbar labels, handed defaults and readable key names', () => {
@@ -81,4 +83,21 @@ test('binds saved before the building keys went anytime reset to the right-hande
   assert.deepEqual(b.adrenaline, ['KeyJ', '']); // your own binding carries over
   assert.deepEqual(b.bCone, ['ShiftLeft', '']); // a new action keeps its default
   assert.deepEqual(loadBinds(null, BINDS_VERSION), defaultBinds());
+});
+
+test('a save from before a new action picks up that action on a free key (left-handed saves too)', () => {
+  const strip = b => Object.fromEntries(Object.entries(b).filter(([id]) => id !== 'dash' && id !== 'turretUp'));
+  const left = loadBinds(strip(leftHandedBinds()), BINDS_VERSION), right = loadBinds(strip(defaultBinds()), BINDS_VERSION);
+  assert.deepEqual(left.turretUp, leftHandedBinds().turretUp, 'left-handed save gets the left-handed Upgrade turret key');
+  assert.equal(left.dash[0], leftHandedBinds().slot4[0], 'the dash shares the save\'s Hotbar slot 4 key');
+  assert.deepEqual(right.turretUp, defaultBinds().turretUp);
+  assert.equal(right.dash[0], defaultBinds().slot4[0]);
+});
+
+test('a version-2 save keeps its keys but re-picks Dash and Upgrade turret (they may have been saved blank)', () => {
+  const v2 = { ...leftHandedBinds(), dash: ['', ''], turretUp: ['', ''] };
+  const b = loadBinds(v2, 2);
+  assert.deepEqual(b.forward, leftHandedBinds().forward, 'the rest of the save is kept');
+  assert.equal(b.dash[0], leftHandedBinds().slot4[0]);
+  assert.deepEqual(b.turretUp, leftHandedBinds().turretUp);
 });

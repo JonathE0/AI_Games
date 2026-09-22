@@ -22,16 +22,18 @@ export const hudReset = () => { for (const k in last) delete last[k]; };
 export const ACTIONS = [
   ['forward', 'Forward', 'KeyW'], ['back', 'Back', 'KeyS'], ['left', 'Strafe left', 'KeyA'], ['right', 'Strafe right', 'KeyD'],
   ['jump', 'Jump', 'Space'], ['crouch', 'Crouch', 'ControlLeft'],
-  ['fire', 'Fire', 'Mouse0'], ['alt', 'Scope / knife stab', 'Mouse2'], ['reload', 'Reload', 'KeyR'],
+  ['fire', 'Fire', 'Mouse0'], ['alt', 'Scope / knife stab / Tank barrier / Fire Strike', 'Mouse2'], ['reload', 'Reload / katana Deflect', 'KeyR'],
   ['inspect', 'Harvest tool', 'KeyX'], // again while holding it: inspect
   ['primary', 'Hotbar slot 1', 'Digit1'], ['secondary', 'Hotbar slot 2', 'Digit2'], ['knife', 'Hotbar slot 3', 'Digit3'],
   ['slot4', 'Hotbar slot 4', 'Digit4'], ['slot5', 'Hotbar slot 5', 'Digit5'], ['slot6', 'Hotbar slot 6', 'Digit6'],
+  ['dash', 'Katana dash', 'Digit4'], // the Ronin's: shares hotbar slot 4's key by default (see setBind / keyAction)
   ['lastWeapon', 'Last weapon'], ['nextWeapon', 'Next weapon', 'WheelDown'], ['prevWeapon', 'Previous weapon', 'WheelUp'],
   ['buy', 'Buy menu', 'KeyB'], ['scoreboard', 'Scoreboard', 'Tab'], ['chat', 'Chat', 'Enter'],
   ['interact', 'Use / pick up / repair / revive', 'KeyE'], ['ready', 'Ready up', 'KeyY'],
   ['throw', 'Throw grenade', 'KeyT'], ['nextThrow', 'Next throwable', 'KeyN'], ['adrenaline', 'Adrenaline shot', 'KeyH'],
   ['sack1', 'Use sack item 1', 'Digit7'], ['sack2', 'Use sack item 2', 'Digit8'], ['sack3', 'Use sack item 3', 'Digit9'], ['sack4', 'Use sack item 4', 'Digit0'],
   ['flashlight', 'Flashlight / lock item in inventory', 'KeyL'], ['backpack', 'Inventory', 'KeyI'], ['map', 'Full map · click to ping', 'KeyM'],
+  ['turretUp', 'Upgrade turret', 'KeyU'],
   // Building (no build mode, like Fortnite's Builder Pro): a piece key starts building that piece from anywhere
   ['bWall', 'Wall', 'KeyQ'], ['bFloor', 'Floor', 'KeyF'], ['bStair', 'Stair / ramp', 'KeyC'], ['bCone', 'Cone (roof)', 'ShiftLeft'],
   ['bTrap', 'Trap (spikes, darts, flames)', 'KeyZ'], ['bDeploy', 'Turret / Rally Fire', 'KeyV'], ['bRotate', 'Rotate stair (while building)', 'KeyR'],
@@ -41,10 +43,10 @@ export const ACTIONS = [
 const LEFT_HANDED = {
   forward: 'KeyO', back: 'KeyL', left: 'KeyK', right: 'Semicolon', jump: 'Space', crouch: ['ControlLeft', 'KeyC'],
   fire: 'Mouse0', alt: 'Mouse2', reload: 'KeyU', inspect: 'KeyA',
-  primary: 'Minus', secondary: 'Digit0', knife: 'Digit9', slot4: 'Digit8', slot5: 'Digit7', slot6: 'Digit6',
+  primary: 'Minus', secondary: 'Digit0', knife: 'Digit9', slot4: 'Digit8', slot5: 'Digit7', slot6: 'Digit6', dash: 'Digit8',
   lastWeapon: 'KeyQ', nextWeapon: 'WheelDown', prevWeapon: 'WheelUp', buy: 'BracketRight', scoreboard: 'Backslash', chat: '',
   interact: 'KeyI', ready: 'KeyR', throw: 'KeyY', nextThrow: 'KeyN', adrenaline: 'KeyF',
-  sack1: 'Digit5', sack2: 'Digit4', sack3: 'Digit3', sack4: 'Digit2', flashlight: 'Equal', backpack: 'Enter', map: 'KeyZ',
+  sack1: 'Digit5', sack2: 'Digit4', sack3: 'Digit3', sack4: 'Digit2', flashlight: 'Equal', backpack: 'Enter', map: 'KeyZ', turretUp: 'Quote',
   bWall: 'KeyP', bFloor: 'KeyM', bStair: 'Comma', bCone: 'Period', bTrap: 'KeyT', bDeploy: 'KeyH', bRotate: 'KeyR', edit: 'KeyJ',
 };
 export const BUILD_ACTIONS = new Set(['bWall', 'bFloor', 'bStair', 'bCone', 'bTrap', 'bDeploy', 'bRotate']);
@@ -55,23 +57,49 @@ const BIND_SECTIONS = [
 export const defaultBinds = () => Object.fromEntries(ACTIONS.map(([id, , a = '', b = '']) => [id, [a, b]]));
 export const leftHandedBinds = () => Object.fromEntries(Object.entries(LEFT_HANDED).map(([id, c]) => [id, Array.isArray(c) ? [...c] : [c, '']]));
 // 2: building keys work anytime, so they share one context with everything else — older saves would clash
-export const BINDS_VERSION = 2;
+export const BINDS_VERSION = 3;
+const REDERIVE = { 2: ['dash', 'turretUp'] }; // v2 saves may hold these blank from a mid-update build: re-pick them
 // Saved binds over the defaults: actions that no longer exist are dropped, new ones keep their default keys.
 // Binds saved under an older BINDS_VERSION reset to the right-handed preset.
 export function loadBinds(saved, version) {
   const binds = defaultBinds();
-  if (version !== BINDS_VERSION) return binds;
-  for (const [id, codes] of Object.entries(saved || {})) if (Object.hasOwn(binds, id) && Array.isArray(codes)) binds[id] = [codes[0] || '', codes[1] || ''];
+  if (version !== BINDS_VERSION && !REDERIVE[version]) return binds;
+  if (REDERIVE[version]) saved = Object.fromEntries(Object.entries(saved || {}).filter(([id]) => !REDERIVE[version].includes(id)));
+  const mine = Object.keys(saved || {}).filter(id => Object.hasOwn(binds, id) && Array.isArray(saved[id]));
+  for (const id of mine) binds[id] = [saved[id][0] || '', saved[id][1] || ''];
+  // an action newer than the save gets the first free default: the right-handed key, else the left-handed one (a
+  // left-handed save), else nothing — the dash defaults to whatever key the save uses for Hotbar slot 4
+  const left = leftHandedBinds(), taken = (id, c) => Object.keys(binds).some(a => a !== id && bindCtx(a) & bindCtx(id) && binds[a].includes(c) && !shares(a, id));
+  for (const id in binds) {
+    if (mine.includes(id) || !binds[id].some(c => c && taken(id, c))) continue; // default free (or unbound): keep it
+    const alt = id === 'dash' ? [binds.slot4[0], ''] : left[id] ?? ['', ''];
+    binds[id] = alt.some(c => c && taken(id, c)) ? ['', ''] : alt;
+  }
   return binds;
 }
 
 // Bind code to binds[id][i], clearing it from every other action (one key, one action). Rotate only acts while
-// building, so it may share a key (R with Reload, like Fortnite).
+// building, so it may share a key (R with Reload, like Fortnite); Use and Inventory may share one too (smart E), and so
+// may the Ronin's dash and hotbar slots 4-6 (he only has 3 hotbar slots — see keyAction).
 const bindCtx = id => (id === 'bRotate' ? 2 : 1);
+const SMART = ['interact', 'backpack'];
+export const DASH_SHARE = ['slot4', 'slot5', 'slot6'];
+const shares = (a, b) => a !== b && ((SMART.includes(a) && SMART.includes(b)) || (a === 'dash' && DASH_SHARE.includes(b)) || (b === 'dash' && DASH_SHARE.includes(a)));
 export function setBind(binds, id, i, code) {
-  if (code) for (const a in binds) if (bindCtx(a) & bindCtx(id)) binds[a] = binds[a].map(c => (c === code ? '' : c));
+  if (code) for (const a in binds) if (bindCtx(a) & bindCtx(id) && !shares(a, id)) binds[a] = binds[a].map(c => (c === code ? '' : c));
   binds[id][i] = code;
 }
+// The action a key press means (map: code -> action, whichever of a shared pair it kept): a key the dash shares with
+// hotbar slot 4-6 dashes for a Ronin and picks the slot for everyone else.
+export function keyAction(map, binds, code, ronin) {
+  const a = map[code];
+  if (a !== 'dash' && !DASH_SHARE.includes(a)) return a;
+  return ronin && binds.dash?.includes(code) ? 'dash' : DASH_SHARE.find(s => binds[s]?.includes(code)) ?? a;
+}
+// Smart E: a key bound to both Use and Inventory closes an open inventory, else uses whatever is in range (a target
+// that does something when pressed or held), else opens the inventory.
+export const smartKey = (binds, code) => !!code && !!binds.interact?.includes(code) && !!binds.backpack?.includes(code);
+export const smartRoute = (bagOpen, target) => (bagOpen ? 'close' : target && (target.press || target.cont || target.hold) ? 'use' : 'open');
 
 const KEY_NAMES = {
   Mouse0: 'Mouse 1', Mouse2: 'Mouse 2', Mouse1: 'Mouse 3', Mouse3: 'Mouse 4', Mouse4: 'Mouse 5',
@@ -127,8 +155,8 @@ export class Hud {
     Object.assign(this.settings, stored);
     this.settings.binds = loadBinds(stored.binds, stored.bindsV);
     this.settings.bindsV = BINDS_VERSION;
-    if (stored.binds && stored.bindsV !== BINDS_VERSION) { // once: the old binds clash with the anytime building keys
-      this.save();
+    if (stored.binds && stored.bindsV !== BINDS_VERSION) this.save(); // keep the migrated binds
+    if (stored.binds && stored.bindsV !== BINDS_VERSION && !REDERIVE[stored.bindsV]) { // once: the old binds clash with the anytime building keys
       $('menuMsg').textContent = 'Keybinds were reset for the new building keys — pick Left or Right handed in Settings → Key bindings';
     }
     this.buildSettings();
@@ -169,7 +197,9 @@ export class Hud {
       if (key === 'antialias') root.insertAdjacentHTML('beforeend', '<small id="gpuInfo"></small>');
     }
     root.insertAdjacentHTML('beforeend', `<h3>KEY BINDINGS</h3>
-      <small>Click a slot, then press a key, mouse button or scroll the wheel. Esc cancels, Backspace clears.</small>
+      <small>Click a slot, then press a key, mouse button or scroll the wheel. Esc cancels, Backspace clears.
+      Use and Inventory may share one key: it uses whatever is in range, otherwise it opens or closes the inventory.
+      Katana dash may share a key with hotbar slots 4-6: the Ronin (3 hotbar slots) dashes, everyone else picks the slot.</small>
       <div id="bindList"></div>
       <div class="row"><button id="bindRight" class="bindReset">Right handed</button><button id="bindLeft" class="bindReset">Left handed</button></div>`);
     const preset = binds => () => {

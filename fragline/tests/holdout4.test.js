@@ -1,6 +1,6 @@
 // Batch 10: Colossus chest snipers, a faster crawl, the Blacksmith unlocking at wave 7, softer zombie
 // damage to walls, a bigger buy ring, an honest (locked-line) Sniper laser, rewards for skipping a break,
-// class kit perks + kit-change gating, and the Medic's reworked wave kit.
+// class kit perks + kit-change gating.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeGun, addItem } from '../server/holdout/inventory.js';
@@ -150,21 +150,21 @@ test('kit changes: free in prep, locked mid-wave and off-cycle, open again every
   assert.equal(p.cls, 'tank', 'allowed in prep, before wave 1');
 
   room.phase = 'wave';
-  room.handle(p, { t: 'class', id: 'medic' });
+  room.handle(p, { t: 'class', id: 'ronin' });
   assert.equal(p.cls, 'tank', 'never mid-wave');
   assert.match(a.last('deny').text, /between waves/i);
 
   room.phase = 'intermission'; room.wave = 6; // break after wave 6: not a multiple of 5
-  room.handle(p, { t: 'class', id: 'medic' });
+  room.handle(p, { t: 'class', id: 'ronin' });
   assert.equal(p.cls, 'tank', 'locked outside the every-5-wave window');
   assert.match(a.last('deny').text, /wave 10/);
 
   room.wave = 5; // break after wave 5: open
-  room.handle(p, { t: 'class', id: 'medic' });
-  assert.equal(p.cls, 'medic');
+  room.handle(p, { t: 'class', id: 'ronin' });
+  assert.equal(p.cls, 'ronin');
 });
 
-test('kit perks: Tank takes less damage and builds faster, Assault buffs fire rate after a kill, Medic Adrenaline Shots heal harder', () => {
+test('kit perks: Tank takes less damage and builds faster, Assault buffs fire rate after a kill, a Ronin\'s Adrenaline Shot heals like anyone\'s', () => {
   const room = started(new HoldoutRoom('KIT', {}));
   const a = join(room, 'A'), p = a.player;
   room.phase = 'wave';
@@ -183,11 +183,11 @@ test('kit perks: Tank takes less damage and builds faster, Assault buffs fire ra
   assert.ok(q.assaultBuffUntil > Date.now(), 'a fire-rate window opens after a kill');
 
   const m = join(room, 'M').player;
-  m.cls = 'medic'; m.hp = 50; m.maxHp = 200; m.shield = 0;
+  m.cls = 'ronin'; m.hp = 50; m.maxHp = 200; m.shield = 0;
   addItem(m, 'adrenaline', 1);
   room.handle(m, { t: 'use', item: 'adrenaline' });
-  assert.equal(m.hp, 50 + ITEMS.adrenaline.hp * CLASSES.medic.healMul, 'a Medic\'s shot heals 25% more');
-  assert.equal(m.shield, ITEMS.adrenaline.sh * CLASSES.medic.healMul, 'and shields 25% more');
+  assert.equal(m.hp, 50 + ITEMS.adrenaline.hp, 'no kit bonus on Adrenaline Shots any more');
+  assert.equal(m.shield, ITEMS.adrenaline.sh);
 });
 
 test('the buy ring grew to 11.7m and the Banker still sits well inside it', () => {

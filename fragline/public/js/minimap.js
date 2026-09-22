@@ -2,7 +2,7 @@
 // full map shows the whole Outpost, zooms with the wheel, pans by dragging and pings a spot on click.
 // Drawn: props, trees and rocks, your squad's builds, the Core and its ring, attack lanes, teammates,
 // survivors, zombies (at night only the ones close by, in your flashlight or just revealed by gunfire),
-// loot, chests, supply drops, the Maw and its thumpers, the Blacksmith and pings.
+// loot, chests, supply drops, the Maw and its thumpers, the Gravekeeper's graves, the Behemoth, the Blacksmith and pings.
 import { OUTPOST, OUTPOST_NODES } from '/shared/outpost.js';
 import { SMITH } from '/shared/holdout.js';
 
@@ -204,6 +204,8 @@ export class Minimap {
     for (const t of h.ents.thumpers?.values() ?? []) dot(t.x, t.z, 4.5, t.state === 'pulse' ? '#5dff7a' : t.state === 'spent' ? '#666' : '#ffb43c');
     const mw = h.ents.maw;
     if (mw) { c.strokeStyle = '#ff5a8a'; c.lineWidth = 2 * k; c.beginPath(); c.arc(X(mw.x), Z(mw.z), 7 * k, 0, Math.PI * 2); c.stroke(); }
+    h.gk.drawMap(c, X, Z, k); // the Gravekeeper's grave pits
+    if (h.bhm.alive) { const b = h.bhm.b.box; rect(b, '#8a3a1f'); c.strokeStyle = '#ff7a2a'; c.lineWidth = 2 * k; c.strokeRect(X(b.min[0]), Z(b.min[2]), (b.max[0] - b.min[0]) * s, (b.max[2] - b.min[2]) * s); } // the Behemoth's footprint
     // zombies (bosses bigger; the Iron Golem an orange square, the Core Seeker a red diamond)
     for (const zb of h.zombies.list.values()) {
       if (zb.dead || !this.zombieVisible(zb, me, dark, h.flashOn, pl.yaw, h.nvK)) continue;

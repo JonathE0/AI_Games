@@ -57,7 +57,10 @@ function stepSwooper(room, z, dt, now) {
     if (!z.dived) { // one hit, the moment it actually passes close enough (the arc's altitude isn't linear in k)
       for (const p of room.targets()) {
         if (!p.alive || p.downed) continue;
-        if (Math.hypot(p.st.p[0] - pos[0], p.st.p[2] - pos[2]) <= t.reach + 1.2 && Math.abs(p.st.p[1] + 0.9 - pos[1]) < 2.2) { room.hurtPlayer(p, t.dmg * mul, z); z.dived = true; break; }
+        if (Math.hypot(p.st.p[0] - pos[0], p.st.p[2] - pos[2]) <= t.reach + 1.2 && Math.abs(p.st.p[1] + 0.9 - pos[1]) < 2.2) {
+          if (!room.barriers.stop([...pos], [p.st.p[0], p.st.p[1] + 0.9, p.st.p[2]], t.dmg * mul, z)) room.hurtPlayer(p, t.dmg * mul, z); // or into a Tank's barrier
+          z.dived = true; break;
+        }
       }
     }
     if (now >= z.stateEnd) { z.state = S.MOVE; z.nextAtk = now + t.cooldown * 1000; } // climbs back to altitude (see the circling code below)
@@ -113,9 +116,9 @@ function stepSkySniper(room, z, dt, now) {
       if (c) {
         const from = z.lockEye ?? [...pos], at = c.at;
         const validEntity = c.kind === 'd' ? room.defenses.list.get(c.ref.id) === c.ref : (c.ref.alive && !c.ref.downed);
-        const clear = room.lineOfSight(from, at);
-        room.broadcast({ t: 'zshot', id: z.id, a: from.map(r2), b: at.map(r2), hit: clear });
-        if (clear && validEntity) {
+        const clear = room.lineOfSight(from, at), wall = clear && room.barriers.stop(from, at, t.dmg * mul, z, true); // a Tank's barrier in the line takes it (a Deflect sends it back)
+        room.broadcast({ t: 'zshot', id: z.id, a: from.map(r2), b: (wall || at).map(r2), hit: clear });
+        if (clear && !wall && validEntity) {
           const cur = c.kind === 'd' ? [c.ref.pos[0], c.ref.pos[1] + 1, c.ref.pos[2]] : c.kind === 'sv' ? [c.ref.pos[0], c.ref.pos[1] + 1.3, c.ref.pos[2]] : [c.ref.st.p[0], c.ref.st.p[1] + 1.3, c.ref.st.p[2]];
           if (onBeam(from, at, cur)) { // still standing where the laser was aimed — didn't dodge
             if (c.kind === 'p') room.hurtPlayer(c.ref, t.dmg * mul, z);

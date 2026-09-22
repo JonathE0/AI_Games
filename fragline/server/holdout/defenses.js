@@ -1,14 +1,13 @@
 // Placed defenses: floor spikes and flame grills on built floors, wall darts on a wall face, the turret
 // family (auto/gatling/frost/rocket/flame/tesla/mortar) and campfires on the ground or on a floor. Traps
 // credit their owner with kills.
-import { DEFENSES, ITEMS, SHIELD_CAP } from '../../shared/holdout.js';
+import { DEFENSES, ITEMS, SHIELD_CAP, TURRET_EL, turretMul } from '../../shared/holdout.js';
 import { GRID, REACH, distToBox, overlaps, slotKey } from '../../shared/build.js';
 import { addItem, countOf, takeItem } from './inventory.js';
 
 const r2 = v => Math.round(v * 100) / 100;
 const HITSCAN = ['turret', 'gturret', 'frturret', 'tesla']; // fire instantly at one target
 const PROJECTILE = ['rturret', 'mortar'];                    // launch a tracked rocket (combat.js)
-export const FORCED_EL = { frturret: 'ice', tesla: 'shock' }; // these two always carry their element
 
 export class Defenses {
   constructor(room) { this.room = room; this.reset(); }
@@ -20,7 +19,8 @@ export class Defenses {
     this.fxAt = 0;
   }
 
-  tuple(d) { return [d.id, d.type, r2(d.pos[0]), r2(d.pos[1]), r2(d.pos[2]), d.axis ?? 0, d.side ?? 0, d.pid ?? 0, d.owner]; }
+  // mods: the Blacksmith upgrades, so late joiners see an upgraded turret as it is (holdout_ents.js defMods)
+  tuple(d) { return [d.id, d.type, r2(d.pos[0]), r2(d.pos[1]), r2(d.pos[2]), d.axis ?? 0, d.side ?? 0, d.pid ?? 0, d.owner, d.mods ?? 0]; }
 
   // m: { item, pid (floor / wall piece), side (+1/-1 wall face), i, k (tile for ground defenses) }
   onPlace(p, m) {
@@ -83,8 +83,8 @@ export class Defenses {
 
   owner(d) { return this.room.players.find(q => q.id === d.owner) || null; }
 
-  // Blacksmith turret upgrades (d.mods: dmg / range / rate levels, inc / frost rounds, plate)
-  maxAmmo(d) { return DEFENSES[d.type].ammo; }
+  // Blacksmith turret upgrades (d.mods: dmg / range / rate / cap / plate levels, inc / frost rounds) — shared/holdout.js turretMul
+  maxAmmo(d) { return Math.round(DEFENSES[d.type].ammo * turretMul(d.mods, 'cap')); }
   broadcastMods(d) { this.room.broadcast({ t: 'dmod', id: d.id, mods: d.mods ?? {}, ammo: d.ammo, hp: Math.round(d.hp) }); }
 
   update(dt, now) {
@@ -121,7 +121,7 @@ export class Defenses {
         if (--d.uses <= 0) this.remove(d);
       } else if (HITSCAN.includes(d.type) || PROJECTILE.includes(d.type)) {
         const eye = [d.pos[0], d.pos[1] + 1.2, d.pos[2]], md = d.mods ?? {};
-        const range = def.range * (1 + 0.2 * (md.range || 0)), minRange = def.minRange || 0;
+        const range = def.range * turretMul(md, 'range'), minRange = def.minRange || 0;
         let best = null, bd = range;
         for (const z of room.zombies.values()) {
           if (z.dead) continue;
@@ -130,9 +130,9 @@ export class Defenses {
           if (room.lineOfSight(eye, [z.pos[0], z.pos[1] + 1.1 * z.s, z.pos[2]])) { bd = dist; best = z; }
         }
         if (!best) { d.next = now + 250; continue; }
-        d.next = now + 1000 / (def.rate * (1 + 0.2 * (md.rate || 0)));
-        const aim = [best.pos[0], best.pos[1] + 1.1 * best.s, best.pos[2]], dmg = def.dmg * (1 + 0.25 * (md.dmg || 0));
-        const el = FORCED_EL[d.type] || (md.inc ? 'fire' : md.frost ? 'ice' : null);
+        d.next = now + 1000 / (def.rate * turretMul(md, 'rate'));
+        const aim = [best.pos[0], best.pos[1] + 1.1 * best.s, best.pos[2]], dmg = def.dmg * turretMul(md, 'dmg');
+        const el = TURRET_EL[d.type] || (md.inc ? 'fire' : md.frost ? 'ice' : null);
         if (HITSCAN.includes(d.type)) {
           room.damageZombie(best, dmg * (room.buffActive('damage') ? 1.3 : 1), this.owner(d), d.type);
           if (el && !best.dead) room.applyElement(best, el, dmg, this.owner(d));
@@ -144,7 +144,7 @@ export class Defenses {
         if (--d.ammo <= 0) this.remove(d);
       } else if (d.type === 'flturret') {
         const eye = [d.pos[0], d.pos[1] + 1.0, d.pos[2]], md = d.mods ?? {};
-        const range = def.range * (1 + 0.2 * (md.range || 0));
+        const range = def.range * turretMul(md, 'range');
         let best = null, bd = range;
         for (const z of room.zombies.values()) {
           if (z.dead) continue;
@@ -158,8 +158,8 @@ export class Defenses {
           const zx = z.pos[0] - eye[0], zz = z.pos[2] - eye[2], zl = Math.hypot(zx, zz) || 1;
           return zl < range && (zx * ux + zz * uz) / zl > def.cos; // inside the cone in front of it
         });
-        d.next = now + (def.tick * 1000) / (1 + 0.2 * (md.rate || 0));
-        const dmg = def.dmg * (1 + 0.25 * (md.dmg || 0));
+        d.next = now + (def.tick * 1000) / turretMul(md, 'rate');
+        const dmg = def.dmg * turretMul(md, 'dmg');
         for (const z of hit) { z.burnUntil = now + def.burnTime * 1000; z.burnDps = def.burn; z.burnBy = this.owner(d); room.damageZombie(z, dmg, this.owner(d), 'flturret'); }
         this.fx.push([d.id, best.id]);
         if (--d.ammo <= 0) this.remove(d);

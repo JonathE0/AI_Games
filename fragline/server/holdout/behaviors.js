@@ -52,9 +52,9 @@ export function stepSniper(room, z, dt, now) {
       if (c) {
         const from = z.lockEye ?? eye, at = c.at; // the exact line the telegraph showed, not a re-aim
         const validEntity = c.kind === 'd' ? room.defenses.list.get(c.ref.id) === c.ref : (c.ref.alive && !c.ref.downed);
-        const clear = room.lineOfSight(from, at);
-        room.broadcast({ t: 'zshot', id: z.id, a: from.map(r2), b: at.map(r2), hit: clear });
-        if (clear && validEntity) {
+        const clear = room.lineOfSight(from, at), wall = clear && room.barriers.stop(from, at, t.dmg * mul, z, true); // a Tank's barrier in the line takes it (a Deflect sends it back)
+        room.broadcast({ t: 'zshot', id: z.id, a: from.map(r2), b: (wall || at).map(r2), hit: clear });
+        if (clear && !wall && validEntity) {
           const cur = c.kind === 'd' ? [c.ref.pos[0], c.ref.pos[1] + 1, c.ref.pos[2]] : c.kind === 'sv' ? [c.ref.pos[0], c.ref.pos[1] + 1.3, c.ref.pos[2]] : [c.ref.st.p[0], c.ref.st.p[1] + 1.3, c.ref.st.p[2]];
           if (onBeam(from, at, cur)) { // still standing where the laser was aimed — didn't dodge
             if (c.kind === 'p') room.hurtPlayer(c.ref, t.dmg * mul, z);
@@ -152,7 +152,7 @@ export function bloaterBurst(room, z) {
     if (Math.hypot(p.st.p[0] - z.pos[0], p.st.p[2] - z.pos[2]) <= b.radius) room.hurtPlayer(p, b.dmg * mul, z, 'acid');
   }
   for (const s of room.builds()) if (distToBox(z.pos, s.box) <= b.radius) room.damagePiece(s, b.sdmg * mul, z);
-  addHazard(room, 'acid', z.pos, b.radius * 0.8, b.pool, b.dps * mul, 30 * mul);
+  addHazard(room, 'acid', z.pos, b.radius * 0.8, b.pool, b.dps * mul, b.sdps * mul);
   room.broadcast({ t: 'splat', id: 0, p: [r2(z.pos[0]), r2(z.pos[1] + 0.8), r2(z.pos[2])], big: 1 });
 }
 
@@ -171,7 +171,8 @@ export function updateHazards(room, now) {
     if (h.sdps) for (const s of room.builds()) if (distToBox(h.p, s.box) <= h.r) room.damagePiece(s, h.sdps * 0.25);
     if (h.zdps) for (const z of room.zombies.values()) { // Brood Launcher bomblets: acid that only hurts zombies
       if (z.dead || Math.hypot(z.pos[0] - h.p[0], z.pos[2] - h.p[2]) > h.r) continue;
-      room.damageZombie(z, h.zdps * 0.25, h.owner, 'broodlauncher');
+      if (h.kind === 'toxic') room.poison(z, h.zdps, h.owner); // a poisoned zombie's death cloud: poisons, zombies only
+      else room.damageZombie(z, h.zdps * 0.25, h.owner, h.w ?? 'broodlauncher'); // h.w: the Knell's shock pools
     }
   }
 }

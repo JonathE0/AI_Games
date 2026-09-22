@@ -226,6 +226,19 @@ const DEFS = {
     noise(c, o, { t: 0.02, dur: 0.02, gain: 0.7, type: 'highpass', freq: 4500, seed: 181 });
     tone(c, o, { t: 0.3, dur: 0.1, gain: 0.2, freq: 900, freqEnd: 600, type: 'triangle' });
   }],
+  // the Ronin's katana: a whistling slash (and one that bites), the Fire Strike roar, the guard's ring, a block's clang,
+  // a perfect parry's bell and the dash's rush of air
+  kat_slash: [0.35, (c, o) => { noise(c, o, { dur: 0.2, gain: 0.7, type: 'bandpass', freq: 900, freqEnd: 5200, q: 1.8, attack: 0.03, seed: 190 }); tone(c, o, { t: 0.02, dur: 0.22, gain: 0.07, freq: 2600, freqEnd: 3400 }); }],
+  kat_hit: [0.4, (c, o) => { noise(c, o, { dur: 0.16, gain: 0.7, type: 'bandpass', freq: 1200, freqEnd: 4200, q: 1.6, attack: 0.02, seed: 191 }); noise(c, o, { t: 0.05, dur: 0.1, gain: 0.8, freq: 900, seed: 192 }); tone(c, o, { t: 0.05, dur: 0.12, gain: 0.4, freq: 160, freqEnd: 70 }); }],
+  kat_strike: [1.0, (c, o) => {
+    noise(c, o, { dur: 0.7, gain: 0.9, type: 'bandpass', freq: 500, freqEnd: 2400, q: 0.9, attack: 0.04, seed: 193 });
+    tone(c, o, { dur: 0.5, gain: 0.35, freq: 110, freqEnd: 60, type: 'sawtooth' });
+    for (let i = 0; i < 6; i++) noise(c, o, { t: 0.1 + i * 0.08, dur: 0.05, gain: 0.3, type: 'bandpass', freq: 1500 + i * 400, q: 3, seed: 194 + i });
+  }],
+  kat_guard: [0.4, (c, o) => { noise(c, o, { dur: 0.12, gain: 0.5, type: 'bandpass', freq: 2500, freqEnd: 6000, q: 2, attack: 0.02, seed: 203 }); tone(c, o, { t: 0.08, dur: 0.3, gain: 0.12, freq: 3520 }); }],
+  kat_block: [0.5, (c, o) => { noise(c, o, { dur: 0.04, gain: 1, type: 'highpass', freq: 2500, seed: 204 }); tone(c, o, { dur: 0.35, gain: 0.25, freq: 1760, freqEnd: 1680 }); tone(c, o, { dur: 0.3, gain: 0.18, freq: 2637 }); }],
+  kat_parry: [0.9, (c, o) => { noise(c, o, { dur: 0.04, gain: 0.9, type: 'highpass', freq: 3000, seed: 200 }); for (const [f, g] of [[2093, 0.3], [3136, 0.22], [4186, 0.15]]) tone(c, o, { dur: 0.7, gain: g, freq: f }); }],
+  kat_dash: [0.45, (c, o) => { noise(c, o, { dur: 0.3, gain: 0.8, type: 'bandpass', freq: 400, freqEnd: 3000, q: 1, attack: 0.02, seed: 201 }); noise(c, o, { t: 0.05, dur: 0.2, gain: 0.3, type: 'highpass', freq: 5000, seed: 202 }); }],
 };
 for (let i = 0; i < 4; i++) { // zombie groans: a detuned, wobbling moan through a throaty band-pass
   DEFS['z_groan' + i] = [1.4, (c, o) => {

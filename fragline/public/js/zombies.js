@@ -1,7 +1,7 @@
 // The horde on the client: binary snapshots interpolated 100 ms in the past on the server's clock
 // (like remote players), every zombie body box in one InstancedMesh, glowing eyes in another, blob
 // shadows in a third, and a procedural shamble / wind-up / strike / death animation.
-// Hit targets use the same hitboxes as players, scaled per type — what you see is what you hit.
+// Shots test the boxes exactly as drawn this frame (targets(): lean, nod, swing, wings) — what you see is what you hit.
 import * as THREE from 'three';
 import { hitboxes } from '/shared/physics.js';
 import { ZTYPES, ZTYPE_IDS, ZCLASSES, ZCLASS_IDS } from '/shared/zombies.js';
@@ -45,6 +45,8 @@ const LOOK = {
   // and a glowing winged sniper (emissive body + glow sprite so it reads from far away, day or night)
   swooper: { skin: [0x4a3a52], shirt: [0x2e2438], pants: 0x201a2c, eye: 0xff5030, wing: 0x2e2438 },
   skysniper: { skin: [0x2a3a4a], shirt: [0x1c2836], pants: 0x141c26, eye: 0x5df2ff, wing: 0x1c2836, glow: 0x5df2ff },
+  // the Gravekeeper: ashen skin, an undertaker's black coat; bell, scythe, lantern and hat are boss_gravekeeper.js
+  gravekeeper: { skin: [0xa9adb5], shirt: [0x1f1b26], pants: 0x15121b, eye: 0xb58cff },
 };
 // zombie classes repaint the base look: plated tanks, blood-red frenzied ones, pale plague medics (+ a green aura)
 const VARIANT = {
@@ -58,7 +60,11 @@ const _q = new THREE.Quaternion(), _e = new THREE.Euler(), _v = new THREE.Vector
 const _c = new THREE.Color(), _w = new THREE.Color(0xffffff);
 const _burn = new THREE.Color(0xff6a1a), _soak = new THREE.Color(0x2f7fff), _chill = new THREE.Color(0xaef4ff), _ice = new THREE.Color(0xd8fbff), _mark = new THREE.Color(0xff2222);
 const _berserk = new THREE.Color(0xff1010); // time's up: red-glowing stragglers (shared/holdout.js berserk)
+const _toxic = new THREE.Color(0x7dff4a); // poisoned (the Toxic element)
 const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
+// what a body slot counts as when shot: the hitbox parts, then slot 9 (helmet/hood cover the head, sac/belly are
+// body; the rifle and riot shield aren't hittable — the server handles the shield), then the jaw
+const slotPart = (L, i) => i < 9 ? HB[i].part : i === 10 || L.helmet ? 'head' : L.sac || L.acc === 'belly' ? 'stomach' : L.acc === 'hood' ? 'head' : null;
 
 // out = root · T(pivot) · Rx(angle) · T(center − pivot) · S(size)
 function part(out, root, px, py, pz, angle, cx, cy, cz, sx, sy, sz) {
@@ -101,7 +107,7 @@ export class ZombieView {
   clock(now) { return this.offset === undefined ? now : now - this.offset; }
 
   // [id, typeIndex, maxHp, x, z, yaw, classIndex]
-  spawn([id, ti, maxHp, x, z, yaw, ci = 0], now) {
+  spawn([id, ti, maxHp, x, z, yaw, ci = 0, y = 0], now) { // y: flyers aloft, lightning risers underground
     if (this.list.has(id)) this.remove(id);
     const type = ZTYPE_IDS[ti] || 'shambler', cls = ZCLASS_IDS[ci] || '', slot = this.free.pop();
     const look = VARIANT[cls] ? VARIANT[cls](LOOK[type] ?? LOOK.shambler) : LOOK[type] ?? LOOK.shambler;
@@ -110,14 +116,17 @@ export class ZombieView {
     const zb = {
       id, type, t, cls, s: t.scale * (ZCLASSES[cls]?.scale ?? 1), slot, maxHp, hp: 1, look,
       skin: look.skin[id % look.skin.length], shirt: look.shirt[(id >> 1) % look.shirt.length],
-      snaps: [{ t: this.clock(now) - DELAY - 0.05, x, y: 0, z, yaw, st: 0, hp: 1 }],
-      pos: [x, 0, z], yaw, st: 0, prevSt: 0, phase: Math.random() * 6.28, dead: false, deadT: 0, flash: 0,
+      snaps: [{ t: this.clock(now) - DELAY - 0.05, x, y, z, yaw, st: 0, hp: 1 }],
+      pos: [x, y, z], yaw, st: 0, prevSt: 0, phase: Math.random() * 6.28, dead: false, deadT: 0, flash: 0,
       wobble: 0.6 + Math.random() * 0.5,
     };
     this.list.set(id, zb);
     if (type === 'shade') this.spawnShade(zb);
     else if (t.flyer) this.spawnFlyer(zb);
-    else this.paint(zb);
+    else {
+      zb.hit = Array.from({ length: SLOTS }, (_, i) => [this.body.instanceMatrix.array, (slot * SLOTS + i) * 16, slotPart(look, i)]).filter(h => h[2]);
+      this.paint(zb);
+    }
   }
 
   // The Shade renders as its own tiny group with two dedicated (unshared) materials, so fading it by
@@ -126,10 +135,11 @@ export class ZombieView {
     const bodyMat = new THREE.MeshBasicMaterial({ color: 0xcdf5ef, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
     const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
     const root = new THREE.Group();
-    const put = (mat, sx, sy, sz, x, y, z) => { const m = new THREE.Mesh(this.boxGeo, mat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); root.add(m); };
-    put(bodyMat, 0.24, 0.86, 0.22, 0, 0.43, 0);   // legs
-    put(bodyMat, 0.5, 0.7, 0.28, 0, 1.21, 0);     // torso
-    put(bodyMat, 0.24, 0.26, 0.24, 0, 1.69, 0);   // head
+    const put = (mat, sx, sy, sz, x, y, z) => { const m = new THREE.Mesh(this.boxGeo, mat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); root.add(m); return m; };
+    const legs = put(bodyMat, 0.24, 0.86, 0.22, 0, 0.43, 0);
+    const torso = put(bodyMat, 0.5, 0.7, 0.28, 0, 1.21, 0);
+    const head = put(bodyMat, 0.24, 0.26, 0.24, 0, 1.69, 0);
+    zb.hit = [[legs, 'legs'], [torso, 'chest'], [head, 'head']].map(([m, part]) => [m.matrixWorld.elements, 0, part]);
     put(eyeMat, 0.045, 0.03, 0.02, -0.05, 1.7, -0.13);
     put(eyeMat, 0.045, 0.03, 0.02, 0.05, 1.7, -0.13);
     root.visible = false;
@@ -154,11 +164,12 @@ export class ZombieView {
     const wingMat = new THREE.MeshBasicMaterial({ color: L.wing ?? L.skin[0], side: THREE.DoubleSide });
     const eyeMat = new THREE.MeshBasicMaterial({ color: L.eye });
     const put = (mat, sx, sy, sz, x, y, z) => { const m = new THREE.Mesh(this.boxGeo, mat); m.scale.set(sx, sy, sz); m.position.set(x, y, z); root.add(m); return m; };
-    put(bodyMat, 0.34, 0.3, 0.85, 0, 0, 0);          // body (models face -Z)
-    put(bodyMat, 0.22, 0.22, 0.3, 0, 0.08, -0.55);   // head
-    put(eyeMat, 0.22, 0.06, 0.05, 0, 0.1, -0.72);
+    const body = put(bodyMat, 0.34, 0.3, 0.85, 0, 0, 0);          // body (models face -Z)
+    const head = put(bodyMat, 0.22, 0.22, 0.3, 0, 0.08, -0.55);
+    const eyes = put(eyeMat, 0.22, 0.06, 0.05, 0, 0.1, -0.72);
     const wingL = put(wingMat, 0.85, 0.05, 0.4, 0.45, 0.05, 0.05);
     const wingR = put(wingMat, 0.85, 0.05, 0.4, -0.45, 0.05, 0.05);
+    zb.hit = [[body, 'chest'], [head, 'head'], [eyes, 'head'], [wingL, 'arm'], [wingR, 'arm']].map(([m, part]) => [m.matrixWorld.elements, 0, part]);
     let glow = null, glowMat = null;
     if (L.glow) { // a long rifle barrel — reads as a winged sniper — plus a glow sprite, visible at night and at range
       put(bodyMat, 0.08, 0.08, 0.6, 0.14, -0.02, -0.85);
@@ -188,8 +199,8 @@ export class ZombieView {
     const L = zb.look, base = zb.slot * SLOTS;
     const cols = [L.pants, L.pants, zb.shirt, zb.shirt, zb.shirt, zb.shirt, L.fist ?? zb.skin, L.fist ?? zb.skin, zb.skin, L.helmet ?? L.sac ?? L.accColor ?? zb.skin, zb.skin];
     const k = zb.flash, fx = zb.fx || 0, berserk = !!(fx & 64);
-    // status tints: burning orange, soaked blue, chilled / frozen icy, marked red (Skybreaker), berserk (wins out — time's up)
-    const tint = berserk ? _berserk : zb.st === 4 ? _ice : fx & 4 ? _chill : fx & 1 || L.hot ? _burn : fx & 2 ? _soak : fx & 32 ? _mark : null;
+    // status tints: burning orange, soaked blue, chilled / frozen icy, poisoned green, marked red (Skybreaker), berserk (wins out — time's up)
+    const tint = berserk ? _berserk : zb.st === 4 ? _ice : fx & 4 ? _chill : fx & 1 || L.hot ? _burn : fx & 2 ? _soak : fx & 128 ? _toxic : fx & 32 ? _mark : null;
     // Snipers get a faint glow at night (brighter body and eyes, easier to spot from afar); berserk always glows
     const glow = zb.type === 'sniper' || zb.type === 'broodsniper' ? Math.max(0, Math.min(1, ((zb.nightK ?? 0) - 0.3) / 0.7)) : berserk ? 0.6 : 0;
     cols.forEach((c, i) => { _c.setHex(c); if (tint) _c.lerp(tint, berserk ? 0.6 : zb.st === 4 ? 0.65 : 0.4); if (glow) _c.lerp(_w, glow * 0.3); this.body.setColorAt(base + i, _c.lerp(_w, k * 0.7)); });
@@ -212,6 +223,7 @@ export class ZombieView {
       if (hp < zb.hp - 0.001) zb.flash = 1;
       zb.hp = hp;
       zb.berserk = !!(fx & 64); // time's up: red-glowing, shows on the minimap regardless of night/distance
+      zb.bleed = v.getUint8(o + 13); // katana bleed stacks: katana.js drips blood off it
       if (fx !== zb.fx) { zb.fx = fx; this.paint(zb); }
       zb.snaps.push({ t: ts, x: v.getInt16(o + 2, true) / 100, y: v.getInt16(o + 4, true) / 100, z: v.getInt16(o + 6, true) / 100, yaw: v.getInt16(o + 8, true) / 10000, st: v.getUint8(o + 10), hp });
       if (zb.snaps.length > 30) zb.snaps.shift();
@@ -244,10 +256,10 @@ export class ZombieView {
 
   clear() { for (const id of [...this.list.keys()]) this.remove(id); }
 
-  // Alive zombies as bullet targets (the positions you are looking at).
+  // Alive zombies as bullet targets: the boxes drawn in the frame you are looking at (rayPlayer tests zb.hit).
   targets() {
     const out = [];
-    for (const zb of this.list.values()) if (!zb.dead) out.push({ id: zb.id, x: zb.pos[0], y: zb.pos[1], z: zb.pos[2], yaw: zb.yaw, c: 0, s: zb.s });
+    for (const zb of this.list.values()) if (!zb.dead) out.push({ id: zb.id, x: zb.pos[0], y: zb.pos[1], z: zb.pos[2], yaw: zb.yaw, c: 0, s: zb.s, boxes: zb.hit });
     return out;
   }
 
@@ -316,6 +328,7 @@ export class ZombieView {
     s.root.position.set(zb.pos[0], zb.pos[1], zb.pos[2]);
     s.root.rotation.y = zb.yaw;
     s.root.scale.setScalar(zb.s);
+    s.root.updateMatrixWorld(); // targets() reads these matrices before the next render
   }
 
   // Swooper / Sky Sniper: wings flap (frantic mid-dive/strike, lazy while circling/hovering), nose dips into
@@ -338,6 +351,7 @@ export class ZombieView {
       f.glowMat.opacity = 0.5 * pulse;
       f.glow.scale.setScalar(1.1 + 0.3 * pulse);
     }
+    f.root.updateMatrixWorld(); // targets() reads these matrices before the next render
   }
 
   pose(zb, dt) {

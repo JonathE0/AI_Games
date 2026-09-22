@@ -33,6 +33,16 @@ export class LocalPlayer {
     const ev = {};
     const tuning = { ...P, ...phys };
     const wasGrounded = this.grounded;
+    const dash = phys.dash; // the Ronin's katana dash (katana.js): a fixed burst along the aim, stopped by walls
+    if (dash?.left > 0 && this.alive && !frozen) {
+      const bx = this.pos[0], bz = this.pos[2], k = Math.min(dt, dash.left);
+      dash.left -= dt;
+      this.vel[0] = dash.v[0]; this.vel[1] = 0; this.vel[2] = dash.v[1];
+      this.grounded = moveCharacter(this.pos, this.vel, k, bodyHeight(this.crouch), boxes, wasGrounded);
+      if (Math.hypot(this.pos[0] - bx, this.pos[2] - bz) < Math.hypot(dash.v[0], dash.v[1]) * k * 0.4) dash.left = 0; // ran into something
+      if (dash.left <= 0) { this.vel[0] *= 0.2; this.vel[2] *= 0.2; }
+      return ev;
+    }
 
     // Crouch over ~120 ms. In the air the feet tuck up instead of the head dropping (crouch-jump).
     const want = input.crouch && this.alive ? 1 : 0;

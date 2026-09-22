@@ -10,14 +10,14 @@ import { shieldBlocks, bloaterBurst, addHazard, updateHazards, updateSpecials, u
 import { FLYER_ALT } from './flyers.js';
 import { BMATS, MAT_IDS, KINDS, PIECE_COST, REPAIR_HP_PER_MAT, START_FRAC, REFUND, KNIFE_BREAK, REACH, pieceBox, pieceBoxes, slotKey, checkPlacement, distToBox, validMask, rampEdit, unsupported } from '../../shared/build.js';
 import { ZTYPES, ZTYPE_IDS, ZCLASSES, ZCLASS_IDS, ZDROPS, CORE_ARMOR, coreHp, bossHp, bossFor, variantChance, hoarderCash } from '../../shared/zombies.js';
-import { ITEMS, RARITY, POWERUPS, BUFF, AMMO, AMMO_IDS, ARMOR_IDS, ATTACH_IDS, MAT_CAP, MONEY_CAP, CLASSES, SURVIVOR_CLASSES, SHIELD_CAP, ADREN_DROP, ADREN_CARRY, intermissionFor, MAW_BREAK, rollLoot, rollDeploy } from '../../shared/holdout.js';
+import { ITEMS, RARITY, POWERUPS, BUFF, AMMO, AMMO_IDS, ARMOR_IDS, ATTACH_IDS, MAT_CAP, MONEY_CAP, CLASSES, SURVIVOR_CLASSES, SHIELD_CAP, ADREN_DROP, intermissionFor, MAW_BREAK, rollLoot, rollDeploy, GUN_MODS } from '../../shared/holdout.js';
 import { rayWorld, blocked } from '../../shared/physics.js';
 import { BoxGrid } from '../../shared/boxgrid.js';
 import { BaseRoom, nextUid } from '../baseRoom.js';
 import { FlowField } from './flowfield.js';
 import { Director } from './director.js';
 import { updateZombies, updateProjectiles } from './ai.js';
-import { Inventory, freshBackpack, carries, gunByUid, countOf, takeItem, makeGun, makeItem, giveItem } from './inventory.js';
+import { Inventory, freshBackpack, carries, gunByUid, countOf, takeItem, makeGun } from './inventory.js';
 import { Combat } from './combat.js';
 import { Defenses } from './defenses.js';
 import { CoreCannon } from './corecannon.js';
@@ -26,6 +26,8 @@ import { SkyBoss } from './skyboss.js';
 import { Events } from './events.js';
 import { Bosses } from './bosses.js';
 import { Blacksmith } from './blacksmith.js';
+import { Barriers } from './barrier.js';
+import { Ronin } from './ronin.js';
 
 export const HOLDOUT = {
   startMoney: 800, startMats: { zink: 290 }, waveMats: { zink: 95 },
@@ -33,6 +35,8 @@ export const HOLDOUT = {
   bleed: 30000, revive: 3000, reviveHp: 80, respawnSolo: 8000, respawnTeam: 12000,
   aiStep: 0.05, coreHeal: 60, chests: 6,
   coreRegen: 2, coreRegenAfter: 4000, // passive HP/s inside the Core ring, starting this long (ms) after your last hit
+  // the Core mends itself (fraction of max HP per s): during breaks, and during a wave once it's gone this long (ms) unhit
+  coreMend: 0.01, coreMendWave: 0.002, coreMendAfter: 8000,
 };
 const r2 = v => Math.round(v * 100) / 100;
 const r3 = v => Math.round(v * 1000) / 1000;
@@ -85,6 +89,8 @@ export class HoldoutRoom extends BaseRoom {
     this.events = new Events(this);
     this.bosses = new Bosses(this);
     this.smith = new Blacksmith(this);
+    this.barriers = new Barriers(this);
+    this.ronin = new Ronin(this); // the melee kit: the katana's moves, bleed, Deflect
     this.zid = 0;
     this.pid = 0;
     this.resetWorld();
@@ -123,11 +129,12 @@ export class HoldoutRoom extends BaseRoom {
     this.integrityDirty = false;
     this.core = { hp: coreHp(this.activeCount()), max: coreHp(this.activeCount()) };
     this.director.reset();
-    for (const m of [this.inventory, this.combat, this.defenses, this.cannon, this.survivors, this.sky, this.events, this.bosses]) m.reset();
+    for (const m of [this.inventory, this.combat, this.defenses, this.cannon, this.survivors, this.sky, this.events, this.bosses, this.barriers, this.ronin]) m.reset();
     this.buffs = {};
     this.teamUps = { vitality: 0, firepower: 0, engineering: 0, gunnery: 0 };
     this.coreHealer = null;
     this.coreHealAt = 0;
+    this.coreHitAt = 0;
     this.flowDirty = true;
     Object.assign(this, { flowAt: 0, aiAcc: 0, snapAt: 0, pieceAt: 0, statAt: 0, rosterAt: 0, lastStat: '', coreAlarmAt: 0, golemWaveAlert: -1, seekerAlertAt: 0, flyerWaveAlert: -1 });
     this.chestSniperTaken = new Set(); // Colossus-wave chest snipers: one per player, reset with the world
@@ -205,8 +212,8 @@ export class HoldoutRoom extends BaseRoom {
       props: [...this.props.values()].filter(s => this.pieces.get(s.id) === s).map(s => [s.prop, s.id, Math.round(s.hp)]),
     });
     this.send(p, { t: 'zclear' });
-    if (this.zombies.size) this.send(p, { t: 'zsp', z: [...this.zombies.values()].map(z => [z.id, z.ti, z.maxHp, r2(z.pos[0]), r2(z.pos[2]), r3(z.yaw), z.ci]) });
-    for (const m of [this.inventory, this.defenses, this.cannon, this.survivors, this.sky, this.events, this.combat, this.bosses]) m.syncTo(p);
+    if (this.zombies.size) this.send(p, { t: 'zsp', z: [...this.zombies.values()].map(z => [z.id, z.ti, z.maxHp, r2(z.pos[0]), r2(z.pos[2]), r3(z.yaw), z.ci, r2(z.pos[1])]) });
+    for (const m of [this.inventory, this.defenses, this.cannon, this.survivors, this.sky, this.events, this.combat, this.bosses, this.barriers]) m.syncTo(p);
     this.send(p, this.buffMsg());
     this.send(p, { t: 'teamups', ups: this.teamUps });
     this.send(p, this.phaseMsg());
@@ -274,11 +281,6 @@ export class HoldoutRoom extends BaseRoom {
   waveCleared() {
     const w = this.wave;
     for (const p of this.players) {
-      if (p.cls === 'medic' && w % 2 === 0) {
-        const n = Math.min(3, Math.max(0, ADREN_CARRY - countOf(p, 'adrenaline'))), extra = 3 - n;
-        if (n) { const left = giveItem(p, makeItem('adrenaline', n)); if (left) this.inventory.dropNear(p, left); }
-        if (extra) this.inventory.dropNear(p, makeItem('adrenaline', extra));
-      }
       p.money = Math.min(MONEY_CAP, p.money + 800 + 100 * w);
       for (const m of MAT_IDS) p.mats[m] = Math.min(MAT_CAP, p.mats[m] + HOLDOUT.waveMats[m]);
       if (p.downed) this.revive(p, null);
@@ -299,7 +301,7 @@ export class HoldoutRoom extends BaseRoom {
     if (next === 'sky') {
       this.broadcast({ t: 'task', text: "Something huge darkens the sky next wave — the squad's sniper rifles are waiting in the team chest, one each!" });
       this.inventory.giveChestSnipers(this.players.length);
-    }
+    } else if (next === 'grave') this.broadcast({ t: 'task', text: 'THE GRAVEKEEPER comes next wave — only CONES seal his grave pits: save materials' });
     if (this.director.planned?.night) this.broadcast({ t: 'task', text: 'Night falls next wave — zombies will be hard to see. Flashlights help!' });
     this.broadcastPhase();
     this.broadcastRoster();
@@ -312,6 +314,7 @@ export class HoldoutRoom extends BaseRoom {
     this.zombies.clear();
     this.proj = [];
     this.director.queue = [];
+    this.bosses.grave.end();
     this.broadcast({ t: 'zclear' });
     this.broadcast({ t: 'hend', win, why, wave: this.wave, diff: this.diffId, stats: this.players.map(p => ({ id: p.id, name: p.name, ...p.stats })) });
     this.broadcastPhase();
@@ -320,7 +323,8 @@ export class HoldoutRoom extends BaseRoom {
   newMatch() {
     this.resetWorld();
     for (const p of this.players) {
-      Object.assign(p, { money: HOLDOUT.startMoney, mats: { ...HOLDOUT.startMats }, ...freshBackpack(), ready: false, carrying: null, buyback: null, stats: freshStats(), as: armorStats(null), fx: null, adrenUntil: 0, lastAdrenaline: 0 });
+      Object.assign(p, { money: HOLDOUT.startMoney, mats: { ...HOLDOUT.startMats }, ...freshBackpack(), ready: false, carrying: null, buyback: null, stats: freshStats(), as: armorStats(null), fx: null, adrenUntil: 0, lastAdrenaline: 0, katana: null, kat: null });
+      this.ronin.onKit(p); // a Ronin gets a fresh katana in slot 1
       this.syncWorld(p);
       this.spawn(p);
     }
@@ -336,8 +340,9 @@ export class HoldoutRoom extends BaseRoom {
       this.director.update(now);
       if (this.director.done()) this.waveCleared();
     }
-    // the Core mends itself very slowly on its own, on top of the hold-E repair between waves
-    if (this.started() && this.core.hp < this.core.max) this.core.hp = Math.min(this.core.max, this.core.hp + this.core.max * 0.0003 * dt);
+    // the Core mends itself (on top of the hold-E repair between waves): fast during breaks, slowly in a wave once it's left alone
+    const mend = this.phase !== 'wave' ? HOLDOUT.coreMend : now - this.coreHitAt >= HOLDOUT.coreMendAfter ? HOLDOUT.coreMendWave : 0;
+    if (this.started() && mend && this.core.hp < this.core.max) this.core.hp = Math.min(this.core.max, this.core.hp + this.core.max * mend * dt);
     for (const p of this.players) {
       if (p.downed) {
         if (p.reviver && now - p.reviveLast < 500) p.bleedEnd += dt * 1000; // bleeding pauses while being revived
@@ -369,14 +374,19 @@ export class HoldoutRoom extends BaseRoom {
         updateHazards(this, now);
         updateSpecials(this, now);
         updatePlayerEffects(this, step, now);
-        for (const z of [...this.zombies.values()]) if (z.burnUntil > now) this.damageZombie(z, z.burnDps * step, z.burnBy, 'flame');
+        for (const z of [...this.zombies.values()]) {
+          if (z.burnUntil > now) this.damageZombie(z, z.burnDps * step, z.burnBy, 'flame');
+          if (z.poisonUntil > now) this.damageZombie(z, z.poisonDps * step, z.poisonBy, 'toxic');
+        }
       }
       this.combat.update(step, now);
+      this.ronin.update(step, now);
       this.defenses.update(step, now);
       this.cannon.update(step, now);
       this.survivors.update(step, now);
       if (this.phase === 'victory' || this.phase === 'defeat') break; // the Core fell
     }
+    this.barriers.update(dt, now);
     this.events.update(dt, now);
     this.inventory.update(now);
     this.inventory.updateGravity(now, dt);
@@ -413,7 +423,7 @@ export class HoldoutRoom extends BaseRoom {
 
   // Binary horde snapshot (little-endian): [u8 1, u8 0, u16 count, f64 time] + per zombie
   // [u16 id, i16 x·100, i16 y·100, i16 z·100, i16 yaw·10000, u8 state (4 = frozen), u8 hp/max·255,
-  //  u8 status (1 burning, 2 soaked, 4 chilled, 8 underground, 16 shield up, 32 marked, 64 berserk), u8 spare] (14 bytes).
+  //  u8 status (1 burning, 2 soaked, 4 chilled, 8 underground, 16 shield up, 32 marked, 64 berserk, 128 poisoned), u8 bleed stacks (the Ronin's katana)] (14 bytes).
   // A plain ArrayBuffer (no Node Buffer) so the room also runs in the browser's solo worker.
   sendSnapshot(now) {
     const buf = new ArrayBuffer(12 + this.zombies.size * 14), v = new DataView(buf);
@@ -429,7 +439,8 @@ export class HoldoutRoom extends BaseRoom {
       v.setInt16(o + 8, clamp16(wrap(z.yaw) * 10000), true);
       v.setUint8(o + 10, now < (z.frozenUntil || 0) ? 4 : z.state);
       v.setUint8(o + 11, Math.max(0, Math.min(255, Math.round((z.hp / z.maxHp) * 255))));
-      v.setUint8(o + 12, (z.burnUntil > now ? 1 : 0) | (z.soakUntil > now ? 2 : 0) | (z.chillAt && now - z.chillAt < 3000 && z.chill > 0 ? 4 : 0) | (z.under ? 8 : 0) | (z.t.shield && now >= (z.shieldDown || 0) ? 16 : 0) | (z.markUntil > now ? 32 : 0) | (z.berserk ? 64 : 0));
+      v.setUint8(o + 12, (z.burnUntil > now ? 1 : 0) | (z.soakUntil > now ? 2 : 0) | (z.chillAt && now - z.chillAt < 3000 && z.chill > 0 ? 4 : 0) | (z.under ? 8 : 0) | (z.t.shield && now >= (z.shieldDown || 0) ? 16 : 0) | (z.markUntil > now ? 32 : 0) | (z.berserk ? 64 : 0) | (z.poisonUntil > now ? 128 : 0));
+      v.setUint8(o + 13, z.bleedUntil > now ? z.bleedN : 0);
       o += 14;
     }
     for (const p of this.players) if (p.ws && p.ws.readyState === 1) p.ws.send(buf);
@@ -456,8 +467,9 @@ export class HoldoutRoom extends BaseRoom {
       hist: [], dmgBy: new Map(), hurtAt: 0, dead: false, frozenUntil: 0, slowUntil: 0, slow: 0, burnUntil: 0,
       stunUntil: 0, markUntil: 0, knock: null,
     };
+    this.bosses.grave.arrive(zb); // the Gravekeeper's wave: it arrives by lightning, from underground (maybe at a pit)
     this.zombies.set(zb.id, zb);
-    this.spawnBatch.push([zb.id, zb.ti, maxHp, r2(x), r2(z), r3(yaw), zb.ci]);
+    this.spawnBatch.push([zb.id, zb.ti, maxHp, r2(zb.pos[0]), r2(zb.pos[2]), r3(zb.yaw), zb.ci, r2(zb.pos[1])]);
     if (type === 'golem' && this.golemWaveAlert !== this.wave) {
       this.golemWaveAlert = this.wave;
       this.broadcast({ t: 'task', text: 'IRON GOLEM — it smashes through walls!' });
@@ -606,6 +618,7 @@ export class HoldoutRoom extends BaseRoom {
     if (this.phase !== 'wave' || this.buffActive('barrier')) return;
     this.core.hp -= dmg * CORE_ARMOR;
     const now = Date.now();
+    this.coreHitAt = now; // holds off its in-wave self-repair
     if (now - this.coreAlarmAt > 4000) { this.coreAlarmAt = now; this.broadcast({ t: 'coreHit', from: z ? [r2(z.pos[0]), r2(z.pos[2])] : null }); }
     if (this.core.hp <= 0) { this.core.hp = 0; this.endMatch(false); }
   }
@@ -631,6 +644,7 @@ export class HoldoutRoom extends BaseRoom {
     if (z.dead || !(dmg > 0) || z.under || z.escaping) return 0; // nothing reaches a burrower underground, or a Hoarder already mid-escape
     if (this.bosses.immune(z)) return 0;           // Brood riders on the Titan's back
     if (z.markUntil > Date.now()) dmg *= MARK_MULT; // Skybreaker: marked zombies take extra from everything
+    if (z.brittleUntil > Date.now()) dmg *= ITEMS.freeze.brittle; // frozen solid by a Blizzard: shatters easier
     if (by?.stats) z.lastHitBy = by.id;
     const dealt = Math.min(dmg, z.hp);
     z.hp -= dmg;
@@ -644,10 +658,12 @@ export class HoldoutRoom extends BaseRoom {
     if (z.dead) return;
     z.dead = true;
     this.zombies.delete(z.id);
+    if (z.poisonUntil > Date.now()) addHazard(this, 'toxic', z.pos, EL.cloudR, EL.cloudTime, 0, 0, z.poisonDps, z.poisonBy); // dies poisoned: a cloud that poisons the rest
     if (z.type === 'hoarder') return this.hoarderPayout(z, killer, wId, hs);
     const reward = z.t.reward, player = killer?.stats ? killer : null;
     if (player) {
       player.stats.kills++;
+      this.masteryKill(player, wId);
       if (!z.noReward) { // berserk reinforcements (director.js) are worth nothing — time's up, no farming them
         player.money = Math.min(MONEY_CAP, player.money + reward);
         if (player.cls === 'assault') player.assaultBuffUntil = Date.now() + CLASSES.assault.killRateMs; // +fire rate briefly after a kill
@@ -670,7 +686,7 @@ export class HoldoutRoom extends BaseRoom {
     if (z.t.burst) bloaterBurst(this, z);
     if (z.t.boss) { // bosses drop guns, ammo, materials and survivor supplies
       this.inventory.scatter(rollLoot('boss'), [z.pos[0], z.pos[1], z.pos[2]], 2.2, true);
-      this.broadcast({ t: 'msg', text: 'The Alpha Brute dropped a pile of loot!' });
+      this.broadcast({ t: 'msg', text: `The ${z.t.name} dropped a pile of loot!` });
       if (z.type === 'alpha') {
         this.inventory.scatter([{ kind: 'gun', w: 'cleaver', r: 4, tier: 3, el: null }], [z.pos[0], z.pos[1], z.pos[2]], 2.2, true);
         this.broadcast({ t: 'msg', text: 'The Alpha Brute dropped the Alpha Cleaver!' });
@@ -682,7 +698,7 @@ export class HoldoutRoom extends BaseRoom {
   // The Hoarder, killed before it reaches the Core: a flat cash bonus for the whole squad (every player gets
   // the full amount, not a split), scaling with wave. Still a normal kill otherwise (feed line, z_die, loot rules).
   hoarderPayout(z, killer, wId, hs) {
-    if (killer?.stats) killer.stats.kills++;
+    if (killer?.stats) { killer.stats.kills++; this.masteryKill(killer, wId); }
     const cash = hoarderCash(this.wave);
     for (const p of this.players) { p.money = Math.min(MONEY_CAP, p.money + cash); this.sendInv(p); }
     this.broadcast({ t: 'hoardcash', p: [r2(z.pos[0]), r2(z.pos[1]), r2(z.pos[2])], amt: cash });
@@ -741,8 +757,9 @@ export class HoldoutRoom extends BaseRoom {
 
   // ---------- players shooting ----------
   onShot(p, m) {
+    if (m.w === 'katana') return this.ronin.onSwing(p, m); // the Ronin's combo keeps its own rules
     const w = WEAPONS[m.w];
-    if (!w || !p.alive || p.downed || p.carrying || !this.hasWeapon(p, m.w)) return;
+    if (!w || !p.alive || p.downed || p.carrying || p.bar?.up || !this.hasWeapon(p, m.w)) return; // no firing behind a raised barrier
     const now = Date.now();
     const gunnery = 1 + 0.06 * (this.teamUps?.gunnery || 0);
     const assaultBuff = p.cls === 'assault' && now < (p.assaultBuffUntil || 0) ? 1 + CLASSES.assault.killRate : 1;
@@ -759,9 +776,13 @@ export class HoldoutRoom extends BaseRoom {
       for (const [i, k] of m.sky.slice(0, 1)) this.sky.hit(p, i | 0, m.o, m.d?.[k | 0], w.dmg * 2 * mult, now);
     }
     if (Array.isArray(m.maw) && w.cat !== 'melee') for (const [k, key] of m.maw.slice(0, w.pellets)) this.bosses.hitMaw(p, m.o, m.d?.[k | 0], w.dmg * mult, key);
+    if (Array.isArray(m.bhm) && w.cat !== 'melee') for (const c of m.bhm.slice(0, w.pellets)) this.bosses.behemoth.hitHeart(p, c?.[0] | 0, m.o, m.d?.[c?.[1] | 0], w.dmg * mult); // the Behemoth's open hearts: [heart, pellet]
     if (!Array.isArray(m.h) || !m.h.length) return;
-    const byZombie = new Map();
-    for (const h of m.h.slice(0, w.pellets * (w.pierce || 1))) { // pierce (Skybreaker): several claims can share one pellet index
+    // gun mods (bullet guns only): Multishot adds a round (k = pellets) at half damage; Piercing lets a round's second
+    // claim (the zombie behind the first) through at 70%. Otherwise one claim per round.
+    const mods = w.cat === 'melee' || w.projectile ? [] : item?.mods ?? [], shots = w.pellets + (mods.includes('multi') ? 1 : 0), perRound = mods.includes('pierce') ? 2 : 1;
+    const byZombie = new Map(), rounds = new Map();
+    for (const h of m.h.slice(0, shots * (w.pierce || perRound))) { // pierce (Skybreaker): several claims can share one pellet index
       const z = this.zombies.get(h?.id);
       if (!z || z.dead || !PARTS.has(h.part)) continue;
       if (w.cat === 'melee') {
@@ -771,10 +792,19 @@ export class HoldoutRoom extends BaseRoom {
           if ((dx * f[0] + dz * f[1]) / Math.max(1e-3, Math.hypot(dx, dz)) < Math.cos(((w.arc / 2 + 15) * Math.PI) / 180)) continue;
         }
       } else if (!this.rayNearZombie(m.o, m.d?.[h.k | 0], z)) continue;
-      const pen = Number.isFinite(+h.pen) ? Math.min(1, Math.max(0, +h.pen)) : 1;
+      let pen = Number.isFinite(+h.pen) ? Math.min(1, Math.max(0, +h.pen)) : 1;
+      if (w.cat !== 'melee') { // (the Skybreaker pierces on its own: any number of claims per round, all at full damage)
+        const k = h.k | 0, got = rounds.get(k) ?? [];
+        if (k >= shots || (!w.pierce && (got.length >= perRound || got.includes(z)))) continue;
+        rounds.set(k, [...got, z]);
+        pen *= (k >= w.pellets ? GUN_MODS.multi.frac : 1) * (got.length && !w.pierce ? GUN_MODS.pierce.frac : 1);
+      }
       (byZombie.get(z) ?? byZombie.set(z, []).get(z)).push({ part: h.part, pen });
     }
+    p.shotItem = item; // kills while this shot resolves (hits, splash, arcs) count toward the gun's mastery
     for (const [z, hits] of byZombie) this.hitZombie(p, z, w, hits, !!m.alt, mult, item?.els ?? (item?.el ? [item.el] : []));
+    if (mods.includes('explo')) this.explodeTips(p, byZombie, w, mult);
+    p.shotItem = null;
     if (w.bite && byZombie.size) { // Maw Fang: every 5th shot pulls nearby zombies toward the first hit
       p.mfShots = (p.mfShots || 0) + 1;
       if (p.mfShots % w.bite === 0) {
@@ -788,6 +818,7 @@ export class HoldoutRoom extends BaseRoom {
         this.broadcast({ t: 'bite', p: at.map(r2) });
       }
     }
+    if (w.pool && byZombie.size && (p.knShots = (p.knShots || 0) + 1) % w.pool.every === 0) this.bosses.grave.knellPool(p, byZombie.keys().next().value.pos, w); // Knell
   }
 
   // The Maw's eruption tears up map props too. Player guns and explosives never damage props or builds.
@@ -800,15 +831,23 @@ export class HoldoutRoom extends BaseRoom {
     }
   }
 
-  // Lag tolerance: the claimed bullet must pass close to where the zombie was during the last ~400 ms.
+  // Lag tolerance: the claimed bullet must pass close to where the zombie was during the last second (clients
+  // draw the horde 100 ms in the past, plus the round trip). tol covers the drawn pose around the feet axis —
+  // up to 1.2·s for a lunging Runner's arms, a leaning head or a flyer's wings — and the history is walked in
+  // ≤ 0.5 m steps so a diving Swooper's 1.7 m jumps between 50 ms samples leave no gaps.
   rayNearZombie(o, d, z) {
     if (!Array.isArray(d) || d.length !== 3 || !d.every(Number.isFinite)) return false;
     const len = Math.hypot(...d);
     if (len < 1e-6) return false;
-    const u = d.map(v => v / len), h = 1.9 * z.s, tol = 0.55 * z.s + 0.5;
-    if (rayAxisDist(o, u, z.pos, h) <= tol) return true;
-    for (let i = 0; i < z.hist.length; i += 4) {
-      if (rayAxisDist(o, u, [z.hist[i + 1], z.hist[i + 2], z.hist[i + 3]], h) <= tol) return true;
+    const u = d.map(v => v / len), h = 1.9 * z.s, tol = 1.25 * z.s + 0.5, H = z.hist;
+    let prev = null;
+    for (let i = 0; i <= H.length; i += 4) {
+      const a = i < H.length ? [H[i + 1], H[i + 2], H[i + 3]] : z.pos;
+      const n = prev ? Math.min(8, Math.ceil(Math.hypot(a[0] - prev[0], a[1] - prev[1], a[2] - prev[2]) / 0.5)) || 1 : 1;
+      for (let k = 1; k <= n; k++) {
+        if (rayAxisDist(o, u, prev ? prev.map((v, j) => v + ((a[j] - v) * k) / n) : a, h) <= tol) return true;
+      }
+      prev = a;
     }
     return false;
   }
@@ -825,6 +864,7 @@ export class HoldoutRoom extends BaseRoom {
       const dx = a[0] - z.pos[0], dz = a[2] - z.pos[2], l = Math.hypot(dx, dz), f = [-Math.sin(z.yaw), -Math.cos(z.yaw)];
       if (l > 0.1 && (dx * f[0] + dz * f[1]) / l < -0.3) total *= 2;
     }
+    if (z.type === 'gravekeeper') total *= this.bosses.grave.bellMult(z, a); // the bell on his back takes double
     const immune = this.bosses.immune(z);
     const blocked = w.cat !== 'melee' && shieldBlocks(z, a, Date.now());
     if (blocked) total *= z.t.shield; // rounds spark off the riot shield
@@ -833,6 +873,7 @@ export class HoldoutRoom extends BaseRoom {
     const dealt = this.damageZombie(z, total, att, w.id, hs && w.cat !== 'melee');
     if (els.length && !z.dead) { const k = els.length > 1 ? 0.8 : 1; for (const el of els) this.applyElement(z, el, total * k, att); } // several elements: each at reduced strength
     if (w.mark && !z.dead) z.markUntil = Date.now() + 5000; // Skybreaker: marked for 5s
+    if (w.chain) this.applyElement(z, 'shock', total, att); // Knell: arcs to the 2 nearest zombies like shock rounds
     if (w.lifesteal && dealt > 0) this.healPlayer(att, dealt * w.lifesteal); // Maw Fang
     if (w.knockdown && !z.dead) { // Alpha Cleaver: stunned and shoved off, no slam
       const dx = z.pos[0] - a[0], dz = z.pos[2] - a[2], d = Math.hypot(dx, dz);
@@ -873,7 +914,39 @@ export class HoldoutRoom extends BaseRoom {
         this.broadcast({ t: 'arc', a: [r2(z.pos[0]), r2(z.pos[1] + 1.2 * z.s), r2(z.pos[2])], b: [r2(o.pos[0]), r2(o.pos[1] + 1.2 * o.s), r2(o.pos[2])] });
         this.damageZombie(o, dmg * EL.arcFrac * (now < (o.soakUntil || 0) ? 2 : 1), by, 'shock');
       }
+    } else if (el === 'toxic') this.poison(z, (dmg * EL.poisonFrac) / EL.poisonTime, by);
+  }
+
+  // Toxic: poison ticks with the burns (update); the strongest dose wins and the timer restarts. Also what a
+  // poisoned zombie's death cloud does to the ones standing in it (behaviors.js updateHazards).
+  poison(z, dps, by) {
+    const now = Date.now();
+    if (z.dead || z.t.immune === 'toxic') return;
+    z.poisonDps = Math.max(z.poisonUntil > now ? z.poisonDps || 0 : 0, dps);
+    z.poisonUntil = now + EL.poisonTime * 1000;
+    z.poisonBy = by;
+  }
+
+  // Explosive tips (gun mod): each round that hits a zombie bursts on the zombies around it for a share of its damage.
+  // Zombies only — player weapons never touch builds or props.
+  explodeTips(p, byZombie, w, mult) {
+    const E = GUN_MODS.explo;
+    for (const [z, hits] of byZombie) {
+      const c = z.pos, dmg = w.dmg * mult * E.frac * hits.reduce((a, h) => a + h.pen, 0);
+      for (const o of [...this.zombies.values()]) {
+        if (o !== z && !o.dead && Math.hypot(o.pos[0] - c[0], o.pos[2] - c[2]) <= E.radius && Math.abs(o.pos[1] - c[1]) < 2) this.damageZombie(o, dmg, p, w.id);
+      }
+      this.broadcast({ t: 'etip', p: [r2(c[0]), r2(c[1] + 1.1 * z.s), r2(c[2])] });
     }
+  }
+
+  // Weapon mastery: a kill counts for the item that made it — the gun whose shot is resolving (p.shotItem), else a
+  // launcher of that id fired in the last 6 s (its rocket / grenade / blast landed). Burns, poison and turrets don't count.
+  // ponytail: projectiles don't carry their item, so a rocket-turret kill inside that window counts for your launcher
+  // too (and a Brood Launcher's direct hits, reported as 'gl', don't) — tag combat.js projectiles with it.uid if it matters.
+  masteryKill(p, wId) {
+    const it = p.shotItem ?? p.inv.find(g => g?.kind === 'gun' && g.id === wId && Date.now() - (p.lastShot[wId] || 0) < 6000);
+    if (it) it.kills = (it.kills || 0) + 1;
   }
 
   // Shockwave Blaster: a cone of force; a hit zombie flies back until it hits something solid or runs out
@@ -1050,6 +1123,7 @@ export class HoldoutRoom extends BaseRoom {
 
   onHarvest(p, m) {
     if (m.sid !== undefined) return this.onHarvestPiece(p, m);
+    if (m.bolt !== undefined) return this.bosses.behemoth.onBolt(p, m); // a bolt on one of the Behemoth's hatches
     if (this.notYet(p)) return;
     const n = this.nodes[m.id | 0], now = Date.now();
     if (!n || n.hp <= 0 || !p.alive || p.downed || p.st.w !== 'knife' || now - p.lastHarvest < 280) return;
@@ -1070,15 +1144,15 @@ export class HoldoutRoom extends BaseRoom {
     if (!tgt || !tgt.downed || tgt === p || !p.alive || p.downed) return;
     if (Math.hypot(p.st.p[0] - tgt.st.p[0], p.st.p[1] - tgt.st.p[1], p.st.p[2] - tgt.st.p[2]) > 2.6) return;
     if (tgt.reviver !== p.id || now - tgt.reviveLast > 500) { tgt.reviver = p.id; tgt.reviveProg = 0; }
-    else tgt.reviveProg += Math.min(400, now - tgt.reviveLast) * (p.cls === 'medic' ? 1 / CLASSES.medic.revive : 1); // medics revive twice as fast
+    else tgt.reviveProg += Math.min(400, now - tgt.reviveLast);
     tgt.reviveLast = now;
     if (tgt.reviveProg >= HOLDOUT.revive) this.revive(tgt, p);
   }
 
-  // Pick a class: in the lobby, or at the Core between waves.
+  // Pick a class: in the lobby, or at the Core between waves. (The old Medic kit became the Ronin.)
   onClass(p, m) {
-    const c = CLASSES[m.id];
-    if (!c || p.cls === m.id) return;
+    const id = m.id === 'medic' ? 'ronin' : m.id, c = Object.hasOwn(CLASSES, id) ? CLASSES[id] : null;
+    if (!c || p.cls === id) return;
     if (this.phase === 'wave') return this.send(p, { t: 'deny', text: 'Change class between waves' });
     if (this.phase === 'intermission' && this.wave % 5 !== 0) {
       const next = Math.ceil((this.wave + 1) / 5) * 5;
@@ -1086,7 +1160,8 @@ export class HoldoutRoom extends BaseRoom {
     }
     if (this.started() && !this.canBuy(p)) return this.send(p, { t: 'deny', text: 'Change class at the Core' });
     const old = p.maxHp || 200;
-    p.cls = m.id;
+    p.cls = id;
+    this.ronin.onKit(p); // into the Ronin: the katana takes hotbar slot 1; out of it: the katana goes
     p.maxHp = this.maxHpFor(p);
     if (p.alive) p.hp = Math.max(1, Math.round((p.hp / old) * p.maxHp));
     this.sendInv(p);
@@ -1094,24 +1169,12 @@ export class HoldoutRoom extends BaseRoom {
     this.broadcast({ t: 'msg', text: `${p.name} is playing ${c.name}` });
   }
 
-  // Passive healing, 4×/s: anyone resting inside the Core ring (HOLDOUT.coreRegen). Medics heal themselves after a
-  // few quiet seconds and everyone standing near them (players and survivors); Medic-class survivors do the same
-  // on a much smaller scale (SURVIVOR_CLASSES.medic).
+  // Passive healing, 4×/s: anyone resting inside the Core ring (HOLDOUT.coreRegen), and Medic-class survivors patch up
+  // the players and survivors around them (SURVIVOR_CLASSES.medic). (The Ronin's own heal: ronin.js.)
   updateMedics(now) {
     if (now - (this.medicAt || 0) < 250) return;
     this.medicAt = now;
     for (const p of this.players) if (this.canBuy(p) && now - (p.hurtAt || 0) > HOLDOUT.coreRegenAfter) this.healPlayer(p, HOLDOUT.coreRegen * 0.25);
-    const M = CLASSES.medic;
-    for (const m of this.players) {
-      if (m.cls !== 'medic' || !m.alive || m.downed) continue;
-      if (now - (m.hurtAt || 0) > 3000) this.healPlayer(m, M.regen * 0.25);
-      for (const q of this.players) if (q !== m && q.alive && !q.downed && Math.hypot(q.st.p[0] - m.st.p[0], q.st.p[2] - m.st.p[2]) <= M.auraR) this.healPlayer(q, M.aura * 0.25);
-      for (const sv of this.survivors.list.values()) if (sv.state === 'active' && Math.hypot(sv.pos[0] - m.st.p[0], sv.pos[2] - m.st.p[2]) <= M.auraR) this.survivors.heal(sv, M.aura * 0.25 * 1.5);
-      if (m.shield < SHIELD_CAP && this.canBuy(m)) { // Medic passive: shield regen near the Core
-        m.shield = Math.min(SHIELD_CAP, m.shield + M.coreShieldRegen * 0.25);
-        this.send(m, { t: 'vit', hp: Math.round(m.hp), sh: Math.round(m.shield) });
-      }
-    }
     for (const sv of this.survivors.list.values()) {
       if (sv.state !== 'active' || sv.cls !== 'medic') continue;
       const C = SURVIVOR_CLASSES.medic;
@@ -1145,16 +1208,15 @@ export class HoldoutRoom extends BaseRoom {
   }
 
   // Adrenaline Shot, the one carried heal (its key, a sack key, or LMB with it in hand): instant +HP and +shield, each
-  // capped, then a short regen (updateAdrenaline). A Medic's shots are 25% stronger. Only ever on yourself.
+  // capped, then a short regen (updateAdrenaline). Only ever on yourself.
   onUse(p, m) {
     const it = ITEMS[m.item], now = Date.now();
     if (it?.kind !== 'adrenaline' || !p.alive || p.downed || !(countOf(p, m.item) > 0) || now - (p.lastAdrenaline || 0) < it.cooldown) return;
     if (p.hp >= p.maxHp && p.shield >= SHIELD_CAP) return this.send(p, { t: 'deny', text: 'Already topped up' });
-    const mul = p.cls === 'medic' ? CLASSES.medic.healMul : 1;
     takeItem(p, m.item, 1);
     p.lastAdrenaline = now;
-    p.hp = Math.min(p.maxHp, p.hp + it.hp * mul);
-    p.shield = Math.min(SHIELD_CAP, p.shield + it.sh * mul);
+    p.hp = Math.min(p.maxHp, p.hp + it.hp);
+    p.shield = Math.min(SHIELD_CAP, p.shield + it.sh);
     p.adrenUntil = now + it.time * 1000;
     this.send(p, { t: 'boost', ms: it.time * 1000 });
     this.send(p, { t: 'vit', hp: Math.round(p.hp), sh: Math.round(p.shield) });
@@ -1162,14 +1224,12 @@ export class HoldoutRoom extends BaseRoom {
     this.broadcastRoster();
   }
 
-  // an Adrenaline Shot's regen (ITEMS.adrenaline.regen HP/s, a Medic's 25% more) while it lasts, 4×/s
+  // an Adrenaline Shot's regen (ITEMS.adrenaline.regen HP/s) while it lasts, 4×/s
   updateAdrenaline(now) {
     if (now - (this.adrenAt || 0) < 250) return;
     this.adrenAt = now;
     const R = ITEMS.adrenaline;
-    for (const p of this.players) {
-      if (p.alive && !p.downed && now < (p.adrenUntil || 0)) this.healPlayer(p, R.regen * 0.25 * (p.cls === 'medic' ? CLASSES.medic.healMul : 1));
-    }
+    for (const p of this.players) if (p.alive && !p.downed && now < (p.adrenUntil || 0)) this.healPlayer(p, R.regen * 0.25);
   }
 
   // the first Brood Titan fell: the Blacksmith sets up by the Core
@@ -1270,6 +1330,8 @@ export class HoldoutRoom extends BaseRoom {
       case 'class': return this.onClass(p, m);
       case 'thump': return this.bosses.onThump(p, m);
       case 'smith': return this.smith.handle(p, m);
+      case 'bar': return this.barriers.onMsg(p, m);
+      case 'kat': return this.ronin.onMsg(p, m);
       case 'ping': return 'ts' in m ? this.handleCommon(p, m) : this.onPing(p, m); // net latency ping (ts) vs map ping (x/z)
       default: this.handleCommon(p, m);
     }

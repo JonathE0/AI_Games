@@ -22,7 +22,7 @@ export const AMMO = {
   medium: { name: 'Medium Ammo', cap: 480, pack: 60, price: 180, color: '#7ac7e8' },
   heavy: { name: 'Heavy Ammo', cap: 60, pack: 10, price: 200, color: '#e87a7a' },
   shells: { name: 'Shells', cap: 80, pack: 16, price: 150, color: '#e8a24a' },
-  rockets: { name: 'Rockets', cap: 12, pack: 2, price: 400, color: '#b4e87a' },
+  rockets: { name: 'Rockets', cap: 50, pack: 5, price: 1000, color: '#b4e87a' },
 };
 export const AMMO_IDS = Object.keys(AMMO);
 export const START_AMMO = { light: 180, medium: 60, heavy: 0, shells: 0, rockets: 0 };
@@ -33,7 +33,9 @@ export const MAT_CAP = 999;
 export const ITEMS = {
   grenade: { name: 'Grenade', kind: 'throw', price: 300, max: 6, dmg: 190, radius: 4.5, fuse: 1.6 },
   molotov: { name: 'Molotov', kind: 'throw', price: 350, max: 6, dps: 40, radius: 3.6, burn: 7 },
-  freeze: { name: 'Freeze Grenade', kind: 'throw', price: 400, max: 6, radius: 5, freeze: 4 },
+  // Blizzard: an icy field (radius m, time s) that slows zombies inside; `freezeAfter` s spent inside (cumulative)
+  // freezes one solid for `freeze` s, taking `brittle`× damage while it lasts (server/holdout/combat.js)
+  freeze: { name: 'Freeze Grenade', kind: 'throw', price: 400, max: 6, radius: 6, time: 6, slow: 0.5, freezeAfter: 1.5, freeze: 3, brittle: 1.25 },
   // the only carried heal: instant +hp and +sh (each capped), then +regen HP/s for `time` s; cooldown in ms
   adrenaline: { name: 'Adrenaline Shot', kind: 'adrenaline', price: 300, max: 10, hp: 25, sh: 25, time: 5, regen: 4, cooldown: 1500 },
   spikes: { name: 'Floor Spikes', kind: 'trap', mount: 'floor', price: 300, max: 10 },
@@ -53,10 +55,12 @@ export const THROWABLES = ITEM_IDS.filter(id => ITEMS[id].kind === 'throw');
 export const TRAPS = ITEM_IDS.filter(id => ITEMS[id].kind === 'trap');
 export const DEPLOYS = ITEM_IDS.filter(id => ITEMS[id].kind === 'deploy');
 export const SHIELD_CAP = 100; // the most shield anyone can hold
-// Hard cap on total Adrenaline Shots carried at once (hotbar + backpack + sack combined) — same number as the
-// stack size, so a player never needs more than one stack's worth. Pickups/buys/chest moves/grants past this
-// leave the rest behind (see server/holdout/inventory.js and room.js).
-export const ADREN_CARRY = ITEMS.adrenaline.max;
+// Hard cap on total Adrenaline Shots carried at once (hotbar + backpack + sack combined): two stacks' worth,
+// per class where a kit says otherwise. Pickups/buys/chest moves/grants past this leave the rest behind (see
+// server/holdout/inventory.js and room.js).
+export const ADREN_CARRY = 20;
+export const ADREN_CARRY_BY_CLASS = { ronin: 30 };
+export const adrenCarry = cls => ADREN_CARRY_BY_CLASS[cls] ?? ADREN_CARRY;
 // Adrenaline Shot drops (server/holdout/room.js killZombie): any kill has a chance at one, these big zombies always
 // drop 1-3; bosses carry 1-3 in their loot pile (rollLoot 'boss').
 export const ADREN_DROP = { chance: 0.12, big: ['brute', 'warden', 'golem'] };
@@ -105,6 +109,7 @@ export const DEFENSES = {
 // turret-family ids that the Blacksmith's anvil can upgrade (dmg/range/rate/ammo/plate, and inc/frost
 // rounds on the ones without a built-in element)
 export const TURRET_TYPES = ['turret', 'rturret', 'gturret', 'frturret', 'flturret', 'tesla', 'mortar'];
+export const TURRET_EL = { frturret: 'ice', tesla: 'shock', flturret: 'fire' }; // built in: no incendiary / frost rounds for these
 
 // The Core's own auto-turret, mounted on its roof (server/holdout/corecannon.js). Indestructible, unlimited
 // ammo, always active during waves. Upgraded at the Core shop's CORE tab: every purchase raises room.coreLevel
@@ -172,7 +177,7 @@ export function shopEntry(id) {
 }
 
 // What an inventory item is worth (selling, and the buy-back price is half of this).
-const GUN_R_MULT = [0.8, 1, 1.3, 1.7, 2.3], GUN_T_MULT = [1, 1.4, 2], ARMOR_T_MULT = [1, 1.4, 2];
+const GUN_R_MULT = [0.8, 1, 1.3, 1.7, 2.3], GUN_T_MULT = [1, 1.4, 2, 2.5, 3], ARMOR_T_MULT = [1, 1.4, 2];
 export function itemValue(it) {
   if (!it) return 0;
   if (it.kind === 'gun') {
@@ -254,40 +259,106 @@ export function rollLoot(kind, rng = Math.random) {
 }
 
 // ---------- the Blacksmith (unlocks once wave 7 is cleared) ----------
-// turret upgrades stack without limit (price × 1.5 ** level, tracked per level in d.mods); "Refill ammo"
-// stays a one-off (no level, just tops the magazine back up to DEFENSES[...].ammo).
+// Turret upgrades with a `per` stack without limit (+per × base stat each level, price × 1.5 ** level, levels in
+// d.mods); refill and incendiary / frost rounds are one-offs. They're also bought standing by the turret itself
+// (turretReach m, the "Upgrade turret" key) — no Blacksmith needed for that.
+// Milestones (ups): unlocked by the wave the squad has reached, each needs the gun's mastery level (shared/items.js
+// MASTERY) plus money and Zinkonium — see milestoneBlock in shared/items.js.
 export const SMITH = {
-  x: -4.2, z: 3.6, reach: 3.6,
+  x: -4.2, z: 3.6, reach: 3.6, turretReach: 3,
   infuse: { money: 1500, zink: 40 },
   turret: {
-    dmg: { name: '+25% damage', price: 800 },
-    range: { name: '+20% range', price: 600 },
-    rate: { name: '+20% fire rate', price: 800 },
+    dmg: { name: '+40% damage', price: 800, per: 0.4 },
+    range: { name: '+25% range', price: 600, per: 0.25 },
+    rate: { name: '+30% fire rate', price: 800, per: 0.3 },
+    cap: { name: '+100% ammo capacity', price: 700, per: 1 },
+    plate: { name: 'Plating +50% HP', price: 700, per: 0.5 },
     ammo: { name: 'Refill ammo', price: 400 },
     inc: { name: 'Incendiary rounds', price: 1000 },
     frost: { name: 'Frost rounds', price: 1000 },
-    plate: { name: 'Armor plate +300 HP', price: 700 },
   },
+  ups: {
+    multi: { name: 'Multishot', wave: 5, mastery: 2, money: 2500, zink: 120 },
+    toxic: { name: 'Toxic element', wave: 5, mastery: 2, money: 2500, zink: 120 },
+    tier4: { name: 'Tier IV', wave: 10, mastery: 4, money: 4000, zink: 200 },
+    pierce: { name: 'Piercing', wave: 15, mastery: 3, money: 3500, zink: 160 },
+    explo: { name: 'Explosive tips', wave: 15, mastery: 3, money: 3500, zink: 160 },
+    tier5: { name: 'Tier V', wave: 20, mastery: 6, money: 8000, zink: 400 },
+    slot2: { name: 'Second mod slot', wave: 25, mastery: 7, money: 6000, zink: 300 },
+  },
+  // The Ronin's katana tree (the panel's Katana section): the same gates as the milestones — the katana's mastery, money,
+  // Zinkonium and the wave reached. Edge levels go in order; Elemental Edge is bought again to switch element.
+  katana: {
+    edge1: { name: 'Edge I', desc: '+20% damage', edge: 1, wave: 0, mastery: 1, money: 1000, zink: 60 },
+    edge2: { name: 'Edge II', desc: '+20% damage', edge: 2, wave: 0, mastery: 2, money: 2000, zink: 100 },
+    edge3: { name: 'Edge III', desc: '+20% damage', edge: 3, wave: 10, mastery: 3, money: 3500, zink: 160 },
+    edge4: { name: 'Edge IV', desc: '+20% damage', edge: 4, wave: 15, mastery: 5, money: 5500, zink: 240 },
+    edge5: { name: 'Edge V', desc: '+20% damage', edge: 5, wave: 20, mastery: 7, money: 8000, zink: 360 },
+    twin: { name: 'Twin Fire Strike', desc: 'Fire Strike throws two crescents in a V', wave: 5, mastery: 3, money: 3000, zink: 150 },
+    mirror: { name: 'Mirror Deflect', desc: 'Reflected projectiles hit twice as hard · perfect window 0.35 s', wave: 5, mastery: 3, money: 2500, zink: 120 },
+    ember: { name: 'Ember Trail', desc: 'Fire Strike leaves burning ground for 3 s', wave: 10, mastery: 4, money: 4000, zink: 200 },
+    chain: { name: 'Chain Dash', desc: 'Two dashes per cooldown', wave: 10, mastery: 4, money: 4000, zink: 180 },
+    hemo: { name: 'Hemorrhage', desc: 'Bleed stacks to 10 and bleeds 50% harder', wave: 15, mastery: 5, money: 4500, zink: 200 },
+    exec: { name: 'Execution', desc: 'The 3rd combo hit kills non-boss zombies under 15% HP', wave: 15, mastery: 6, money: 6000, zink: 260 },
+    elem: { name: 'Elemental Edge', desc: 'The blade and Fire Strike carry an element (buy again to switch)', wave: 20, mastery: 5, money: 5000, zink: 220 },
+  },
+};
+// a turret's stat multiplier from its upgrade levels, and what the next level of an upgrade costs
+export const turretMul = (mods, up) => 1 + (SMITH.turret[up]?.per ?? 0) * (mods?.[up] || 0);
+export const turretUpPrice = (up, mods) => { const u = SMITH.turret[up]; return u.per ? Math.round(u.price * 1.5 ** (mods?.[up] || 0)) : u.price; };
+// Gun mods fitted at the Blacksmith (it.mods, one slot — two with the slot2 milestone). Bullet guns only.
+export const GUN_MODS = {
+  multi: { name: 'Multishot', desc: 'Every shot fires one extra round at 50% damage', frac: 0.5 },
+  pierce: { name: 'Piercing', desc: 'Rounds go on through one more zombie at 70% damage', frac: 0.7 },
+  explo: { name: 'Explosive tips', desc: 'Every hit bursts for 30% damage on zombies within 1.5 m', radius: 1.5, frac: 0.3 },
 };
 
 // ---------- player classes (picked in the lobby or at the Core during a break) ----------
 export const CLASSES = {
   tank: {
     name: 'Tank', hp: 300, speed: 0.88, dr: 0.15, buildMul: 1.25,
-    desc: '300 health · a bit slower · takes 15% less damage · immune to knockback and stuns from zombies · builds and repairs 25% faster',
+    desc: '300 health · a bit slower · takes 15% less damage · immune to knockback and stuns from zombies · builds and repairs 25% faster · hold right-click with any gun but a sniper to raise a 1200 HP barrier',
   },
   assault: {
     name: 'Assault', hp: 200, speed: 1.1, dmg: 1.2, mag: 1.5, ammo: 1.5, killRate: 0.15, killRateMs: 3000,
     desc: '+20% damage · 50% bigger magazines · carries 50% more ammo · faster · +15% fire rate for 3s after a kill',
   },
-  medic: {
-    name: 'Medic', hp: 200, speed: 1, regen: 6, aura: 8, auraR: 5, revive: 0.5, healMul: 1.25, coreShieldRegen: 2,
-    desc: 'Heals over time and heals people near you · revives twice as fast · Adrenaline Shots are 25% stronger · 3 free Adrenaline Shots every 2 waves · regenerates shield near the Core',
+  // the melee kit (server/holdout/ronin.js): heal HP/s anywhere once `healAfter` ms unhurt, +1 Adrenaline Shot every
+  // `adrenEvery` ms (carries adrenCarry('ronin')), 3 hotbar slots with the Zinkonium Katana locked in the first
+  ronin: {
+    name: 'Ronin (Melee)', hp: 200, speed: 1.2, heal: 3, healAfter: 3000, adrenEvery: 5000,
+    desc: '20% faster · heals 3 HP/s anywhere after 3 s unhurt · +1 Adrenaline Shot every 5 s (carries 30) · 3 hotbar slots, the Zinkonium Katana locked in slot 1: 3-hit combo, right-click Fire Strike, reload to Deflect, the dash key to dash',
   },
 };
 // how much of an ammo type you can carry (Assault carries more)
 export const ammoCap = (type, cls) => Math.round((AMMO[type]?.cap ?? 0) * (CLASSES[cls]?.ammo ?? 1));
 export const CLASS_IDS = Object.keys(CLASSES);
+// The Tank's barrier (server/holdout/barrier.js): a wall of energy `dist` m in front, `width` × `height` m, facing
+// your aim. hp; lowered it regrows `regen` HP/s after `delay` ms, broken it waits `cooldown` ms and regrows from 0.
+// Raised: no firing and `speed`× run speed. Doesn't block movement.
+export const BARRIER = { hp: 1200, regen: 150, delay: 2000, cooldown: 4000, dist: 1.2, width: 4, height: 2.6, speed: 0.6 };
+// right-click raises it with any Holdout gun except snipers (they keep their scope)
+export const canBarrier = id => WEAPONS[id]?.mode === 'holdout' && WEAPONS[id].cat !== 'sniper' && WEAPONS[id].cat !== 'melee';
+// The Ronin's Zinkonium Katana (server/holdout/ronin.js; upgrades in SMITH.katana). Every hit deals its base × (1 + edge ×
+// Edge level) × the team damage buffs, adds a bleed stack and crits ×crit from more than `back`° off the zombie's facing.
+// combo: the LMB chain, a swing every swingMs, a swing within `window` ms of the last one's end continues it.
+// strike: Fire Strike (RMB) — flaming crescents at `speed` m/s for `range` m, through every zombie within r m (each once)
+// and through builds and props (never hurting them); the ground, the map's edge and the Core stop it. cd in ms.
+// ember: Ember Trail's burning ground (zombies only), a patch every `every` m. deflect: the reload key — for `ms` it blocks
+// zombie swings and projectiles from within `arc`° in front, reflecting projectiles at their shooter for `reflect`× their
+// damage (× mirror more with Mirror Deflect); a block in the first `perfect` ms (mirrorPerfect with Mirror) is a perfect
+// parry: +heal HP and +1 Adrenaline Shot, once a stance. dash: `dist` m along your aim over `ms`, through zombies (dmg
+// each, within r m), walls stop it. bleed: dps per stack for `time` s, stacks to max (Hemorrhage: hemoMax, ×hemoMul).
+export const KATANA = {
+  reach: 3, maxHits: 8, swingMs: 350, window: 900, edge: 0.2, back: 110, crit: 1.5, exec: 0.15,
+  combo: [{ dmg: 95, arc: 110 }, { dmg: 95, arc: 110 }, { dmg: 150, arc: 150, knock: 2.5 }],
+  strike: { dmg: 120, speed: 25, range: 30, r: 1.3, cd: 6000, twin: 12 },
+  ember: { r: 1.6, time: 3, dps: 40, every: 3 },
+  deflect: { ms: 1200, cd: 3000, arc: 150, perfect: 250, mirrorPerfect: 350, heal: 15, reflect: 2, mirror: 2 },
+  dash: { dist: 7, ms: 200, cd: 5000, dmg: 80, r: 1.1 },
+  bleed: { dps: 3, time: 4, max: 5, hemoMax: 10, hemoMul: 1.5 },
+  els: ['shock', 'ice', 'toxic', 'fire'], // Elemental Edge's picks
+};
 
 // ---------- survivor classes (rolled when a wounded survivor is rescued) ----------
 // hpMult/dmgMult scale the tier's base numbers; guns[tier] curates which gun that class carries at each
@@ -315,7 +386,7 @@ export const SURVIVOR_CLASS_IDS = Object.keys(SURVIVOR_CLASSES);
 // ---------- survivors ----------
 // Survivors come in tiers (raw gun quality: hp/dmg/rpm/hit/range/mag/ammo) crossed with a class (which
 // actual gun they carry — see SURVIVOR_CLASSES[cls].guns — and their look). They heal very slowly on their own
-// (Medics, Medic survivors and Rally Fires patch them up faster) and a dead survivor is gone for good.
+// (Medic survivors and Rally Fires patch them up faster) and a dead survivor is gone for good.
 export const SURVIVOR = {
   speed: 3.4, reload: 2.2, retreat: 6, leash: 14, // retreat: back off when a zombie is this close; leash: max stray from the Core
   tiers: [

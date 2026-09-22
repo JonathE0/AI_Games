@@ -5,6 +5,7 @@ import { WEAPONS } from '/shared/weapons.js';
 import { RARITY } from '/shared/holdout.js';
 import { ELEMENTS } from '/shared/elements.js';
 import { skinFor } from './skins.js';
+import { buildKatana } from './katana.js';
 
 const RARITY_COLORS = RARITY.map(r => r.color);
 // held non-gun items: [size], default color per kind; some items get their own color
@@ -53,7 +54,24 @@ const BOSS_FINISH = {
   skybreaker: { a: 0x8a6a1a, b: 0x5a2f9c },
   broodlauncher: { b: 0x8fe03a, c: 0x1f2b16 },
   mawfang: { a: 0x3a1414, b: 0xd9d0b0 },
+  knell: { a: 0x8a5a22, b: 0x7a5ad8 },
+  siegebreaker: { a: 0x4a4f57, b: 0xff7a2a, c: 0x7a4a2a },
 };
+// A teammate's Zinkonium Katana: a long thin blade with a glowing edge over a gold tsuba and a dark grip, held up a little.
+const KAT_GLOW = new THREE.MeshBasicMaterial({ color: 0x5ee6d0 }); // shared, never disposed (like the mat() cache)
+function katana3P(parent) {
+  const k = new THREE.Group();
+  k.rotation.x = 0.3;
+  box(k, 0x15171d, [0.035, 0.04, 0.24], [0, 0, 0.04]);
+  box(k, 0xc9a24a, [0.08, 0.075, 0.012], [0, 0, -0.085]);
+  box(k, 0xd4dbe2, [0.012, 0.045, 0.92], [0, 0.006, -0.55]);
+  const edge = new THREE.Mesh(BOX, KAT_GLOW);
+  edge.scale.set(0.014, 0.008, 0.9);
+  edge.position.set(0, -0.018, -0.55);
+  k.add(edge);
+  parent.add(k);
+  return k;
+}
 const skinId = id => WEAPONS[id]?.skinOf || id; // Holdout's SSG/AWP wear the same skins
 const skin3P = {};
 const skinMat3P = id => (skin3P[id] ??= (() => {
@@ -98,15 +116,21 @@ export class PlayerModel {
     this.visor.position.set(head.c[0], head.c[1] + 0.02, head.c[2] - head.h[2] - 0.006);
     this.visor.scale.set(head.h[0] * 1.7, 0.07, 0.02);
     this.gunPivot.position.set(0.03, fore.c[1] + 0.06, fore.c[2]);
-    this.gunPivot.rotation.x = pitch * 0.8;
+    const s = Math.sin((this.swingT || 0) * Math.PI); // a katana swing sweeps across (swing())
+    this.gunPivot.rotation.set(pitch * 0.8 - s * 0.9, s * ((this.swingT || 0) - 0.5) * 3, 0);
     if (weapon !== this.weapon) {
       this.weapon = weapon;
       this.gun.material = weapon === 'knife' ? mat(0x2b5ce0) : skinMat3P(weapon); // skins on teammates' guns too
       const len = GUN_LEN[WEAPONS[weapon]?.cat] ?? 0.5;
       this.gun.scale.set(0.05, 0.08, len);
       this.gun.position.set(0, 0, -len / 2 - 0.05);
+      if (weapon === 'katana') this.katana ??= katana3P(this.gunPivot);
+      this.gun.visible = weapon !== 'katana';
+      if (this.katana) this.katana.visible = weapon === 'katana';
     }
   }
+
+  swing() { this.swingT = 1; }
 
   // world position of the muzzle (for remote tracers / flashes)
   muzzle() {
@@ -122,6 +146,7 @@ export class PlayerModel {
   }
 
   update(dt) {
+    this.swingT = Math.max(0, (this.swingT || 0) - dt * 3.2);
     if (!this.dead) return;
     this.deadT = Math.min(1, this.deadT + dt * 2.5);
     const e = 1 - (1 - this.deadT) ** 3;
@@ -280,9 +305,9 @@ function buildGun(model, id) {
       break;
     }
     case 'ak': case 'galil': case 'm4': case 'm4s': {
-      const ak = model === 'ak', gal = model === 'galil';
-      const body = ak ? 0x2b2b2b : gal ? 0x4a5240 : 0x1f2226;
-      const furn = ak ? WOOD : gal ? 0x3a4034 : 0x2b2f35;
+      const ak = model === 'ak', gal = model === 'galil', boss = BOSS_FINISH[id]; // the Knell: bronze body, violet furniture
+      const body = boss ? boss.a : ak ? 0x2b2b2b : gal ? 0x4a5240 : 0x1f2226;
+      const furn = boss ? boss.b : ak ? WOOD : gal ? 0x3a4034 : 0x2b2f35;
       box(g, body, [0.05, 0.075, 0.34], [0, 0, -0.02]);
       box(g, furn, [0.056, 0.06, 0.2], [0, -0.005, -0.28]);
       box(g, 0x2a2a2a, [0.018, 0.018, 0.22], [0, 0.01, -0.46]);
@@ -305,15 +330,17 @@ function buildGun(model, id) {
       muzzle = -0.78;
       break;
     }
-    case 'rocket': // shoulder tube with a warhead poking out
-      cyl(g, 0x4b5a3e, 0.075, 0.95, [0, 0.02, -0.12]);
-      cyl(g, 0x2b2f35, 0.085, 0.08, [0, 0.02, -0.6]);
-      cyl(g, 0x2b2f35, 0.085, 0.08, [0, 0.02, 0.35]);
+    case 'rocket': { // shoulder tube with a warhead poking out (the Siegebreaker: iron, rust bands, a glowing warhead)
+      const boss = BOSS_FINISH[id];
+      cyl(g, boss ? boss.a : 0x4b5a3e, 0.075, 0.95, [0, 0.02, -0.12]);
+      cyl(g, boss ? boss.c : 0x2b2f35, 0.085, 0.08, [0, 0.02, -0.6]);
+      cyl(g, boss ? boss.c : 0x2b2f35, 0.085, 0.08, [0, 0.02, 0.35]);
       box(g, 0x30343a, [0.03, 0.12, 0.05], [0, -0.1, -0.02], [-0.2, 0, 0]);
       box(g, 0x1b1d21, [0.03, 0.05, 0.1], [0.06, 0.1, -0.1]);
-      box(g, 0xb04030, [0.06, 0.06, 0.12], [0, 0.02, -0.68]);
+      box(g, boss ? boss.b : 0xb04030, [0.06, 0.06, 0.12], [0, 0.02, -0.68]);
       muzzle = -0.72;
       break;
+    }
     case 'item': { // a held grenade / adrenaline shot / trap: the shape and color follow the item (ViewModel.set)
       const m = new THREE.Mesh(BOX, new THREE.MeshLambertMaterial({ color: 0xffffff })); // own material: recolored per item
       m.position.set(0, -0.02, -0.08);
@@ -350,6 +377,7 @@ function buildGun(model, id) {
       g.userData.muzzle = new THREE.Vector3(0, 0, boss ? -0.36 : -0.3);
       return g;
     }
+    case 'katana': return buildKatana(g); // the Ronin's Zinkonium Katana (katana.js): its own blade, glow and moves
     case 'minigun': { // six spinning barrels
       box(g, 0x2e3238, [0.14, 0.14, 0.34], [0, -0.02, 0.05]);
       const barrels = new THREE.Group();
@@ -431,6 +459,7 @@ export class ViewModel {
     this.silenced = WEAPONS[weaponId].silenced;
     this.melee = WEAPONS[weaponId].cat === 'melee';
     const g = this.current;
+    g.userData.tint?.(item); // the katana's edge glows in its element's color
     if (g.userData.itemMesh) {
       const look = ITEM_LOOK[item?.kind] ?? ITEM_LOOK.trap, id = item?.id;
       const color = ITEM_COLOR[id] ?? look[1];
@@ -501,6 +530,7 @@ export class ViewModel {
       r.rotation.x -= k * 0.9;
     }
     this.applyInspect(s.inspect ?? -1);
+    this.current.userData.pose?.(dt); // the katana's slashes and guard
     if (this.flashT > 0 && (this.flashT -= dt) <= 0) this.flash.visible = false;
   }
 

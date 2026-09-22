@@ -231,18 +231,16 @@ test('inventory: 6 + 18 slots, stacking, drag between slots, armor slots, droppi
   assert.ok([...room.inventory.pickups.values()].some(pk => pk.item?.id === 'grenade'));
 });
 
-test('classes: tank health, assault damage and magazines, medic heals and revives faster', () => {
+test('classes: tank health, assault damage and magazines, the Ronin takes up his katana', () => {
   const room = started(new HoldoutRoom('K', {}));
   const a = join(room, 'A'), b = join(room, 'B'), p = a.player, q = b.player;
   room.handle(p, { t: 'class', id: 'tank' });
   assert.equal(p.maxHp, 300);
   assert.equal(p.hp, 300);
-  room.handle(q, { t: 'class', id: 'medic' });
-  p.st.p = [0, 0, -3]; q.st.p = [1, 0, -3];
-  p.hp = 60;
+  room.handle(q, { t: 'class', id: 'ronin' });
+  assert.deepEqual([q.maxHp, q.inv[0]?.id], [200, 'katana']);
+  p.st.p = [0, 0, -3];
   room.phase = 'intermission'; room.phaseEnd = T + 60000;
-  advance(room, 2000);
-  assert.ok(p.hp > 72, 'medic aura heals teammates nearby');
   room.handle(p, { t: 'class', id: 'assault' });
   assert.equal(room.dmgMultFor(p), 1.2);
   p.st.p = [30, 0, 30]; // change class only at the Core once the game is on
@@ -515,7 +513,7 @@ test('Blacksmith: forges tier III, infuses, fits attachments and upgrades turret
   room.handle(p, { t: 'smith', op: 'turret', def: 99, up: 'ammo' });
   assert.equal(d.ammo, DEFENSES.turret.ammo);
   room.handle(p, { t: 'smith', op: 'turret', def: 99, up: 'plate' });
-  assert.equal(d.hp, 650);
+  assert.equal(d.hp, 525, 'plating: +50% of the base HP');
   p.st.p = [30, 0, 30];
   room.handle(p, { t: 'smith', op: 'infuse', uid: gun.uid, el: 'fire' });
   assert.equal(gun.el, 'ice', 'you have to stand at the anvil');

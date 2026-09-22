@@ -14,6 +14,8 @@ import { rollLoot, MONEY_CAP } from '../../shared/holdout.js';
 import { raySphere } from '../../shared/skyboss.js';
 import { distToBox } from '../../shared/build.js';
 import { addHazard, onBeam } from './behaviors.js';
+import { Gravekeeper } from './gravekeeper.js';
+import { Behemoth } from './behemoth.js';
 
 const r2 = v => Math.round(v * 100) / 100;
 export const MAW = {
@@ -27,17 +29,19 @@ const RIDER_DROP = 12000, MINION_DROP = 8000;
 const TITAN_COUNT = 2, TITAN_HP_SHARE = 0.75; // wave 10 (25, 40…): two Titans, each at 75% of the old solo HP
 
 export class Bosses {
-  constructor(room) { this.room = room; this.reset(); }
+  constructor(room) { this.room = room; this.grave = new Gravekeeper(room); this.behemoth = new Behemoth(room); this.reset(); } // wave 20: gravekeeper.js, 25: behemoth.js
 
   reset() {
     this.titans = [];          // [{ phase: 'waiting' | 'coming' | 'fighting' | 'dead', w, at, z }] — always 2 on a Titan wave
     this.maw = null;
     this.thumpers = [];
     this.smith = false;       // the Blacksmith unlocks once wave 7 is cleared (see room.js waveCleared)
+    this.grave.reset();
+    this.behemoth.reset();
   }
 
   // wave director asks: may the wave end?
-  busy() { return this.titans.some(t => t.phase !== 'dead') || !!(this.maw && !this.maw.dead); }
+  busy() { return this.titans.some(t => t.phase !== 'dead') || !!(this.maw && !this.maw.dead) || this.grave.busy() || this.behemoth.busy(); }
 
   onWave(w, now = Date.now()) {
     const room = this.room, boss = bossFor(w);
@@ -45,6 +49,8 @@ export class Bosses {
       this.titans = Array.from({ length: TITAN_COUNT }, () => ({ phase: 'waiting', w, at: 0, z: null }));
       room.broadcast({ t: 'task', text: 'TWO BROOD TITANS are coming once this wave is cleared — build strong, save rockets' });
     } else if (boss === 'maw') this.startMaw(w, now);
+    else if (boss === 'grave') this.grave.start(w, now);
+    else if (boss === 'behemoth') this.behemoth.onWave(w);
   }
 
   update(dt, now) {
@@ -53,6 +59,8 @@ export class Bosses {
     if (this.titans.length) this.updateTitans(now);
     if (this.maw && !this.maw.dead) this.updateMaw(dt, now);
     this.updateThumpers(now);
+    this.grave.update(dt, now);
+    this.behemoth.update(dt, now);
   }
 
   // ---------- Brood Titan(s) ----------
@@ -177,9 +185,9 @@ export class Bosses {
       const alive = c && (c.kind === 'sv' || (c.ref.alive && !c.ref.downed));
       if (c && alive) {
         const from = z.lockEye ?? eye, at = c.at; // the exact line the telegraph showed, not a re-aim
-        const clear = room.lineOfSight(from, at);
-        room.broadcast({ t: 'zshot', id: z.id, a: from.map(r2), b: at.map(r2), hit: clear });
-        if (clear) {
+        const clear = room.lineOfSight(from, at), wall = clear && room.barriers.stop(from, at, t.dmg, z, true); // a Tank's barrier in the line takes it (a Deflect sends it back)
+        room.broadcast({ t: 'zshot', id: z.id, a: from.map(r2), b: (wall || at).map(r2), hit: clear });
+        if (clear && !wall) {
           const cur = c.kind === 'sv' ? [c.ref.pos[0], c.ref.pos[1] + 1.3, c.ref.pos[2]] : [c.ref.st.p[0], c.ref.st.p[1] + 1.3, c.ref.st.p[2]];
           if (onBeam(from, at, cur)) { if (c.kind === 'sv') room.survivors.hurt(c.ref, t.npcDmg); else room.hurtPlayer(c.ref, t.dmg, z); }
         }
@@ -203,7 +211,7 @@ export class Bosses {
   }
 
   // riders can't be hurt while mounted
-  immune(z) { return !!z.mount; }
+  immune(z) { return !!z.mount || this.grave.immune(z); }
 
   // ---------- the Maw ----------
   startMaw(w, now) {
@@ -386,6 +394,8 @@ export class Bosses {
     if (m && !m.dead) this.room.send(p, { t: 'maw', ev: 'sync', x: r2(m.x), z: r2(m.z), hp: Math.round(m.hp), max: m.max, mode: m.mode, need: m.need, stage: m.stage });
     if (this.thumpers.length) this.syncThumpers(p);
     if (this.smith) this.room.send(p, { t: 'smith', on: true });
+    this.grave.syncTo(p);
+    this.behemoth.syncTo(p);
   }
 }
 

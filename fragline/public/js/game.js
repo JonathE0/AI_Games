@@ -5,7 +5,7 @@ import { WEAPONS } from '/shared/weapons.js';
 import { rayWorld, dirFromAngles, eyeHeight } from '/shared/physics.js';
 import { World } from './world.js';
 import { Sound } from './audio.js';
-import { Hud } from './hud.js';
+import { Hud, smartKey, keyAction } from './hud.js';
 import { Input } from './input.js';
 import { Net, SOLO } from './net.js';
 import { LocalPlayer } from './player.js';
@@ -357,6 +357,7 @@ export class Game {
     if (!w || !Array.isArray(m.o)) return;
     const r = this.remotes.get(m.id);
     const muffle = this.occluded(m.o) ? 1100 : 0;
+    if (m.w === 'katana') return this.holdout?.kat.remoteSwing(m, r); // the Ronin's slash: its trail, sound and swing
     if (w.cat === 'melee') { this.sound.play('knife_swing', { pos: m.o, vol: 0.9, ref: 2, muffle }); return; }
     this.sound.play('shot_' + (w.snd || w.id), {
       pos: m.o, vol: w.silenced ? 0.8 : 1.3, ref: w.silenced ? 2.5 : 6, roll: w.silenced ? 1.6 : 0.7, muffle,
@@ -394,7 +395,7 @@ export class Game {
       this.player.tag = 0.4;
       this.weapons.punch[1] += m.armor > 0 && m.part !== 'head' ? 0.6 : 2.2; // aim punch; armor softens it
     } else if (m.att === this.me.id) {
-      if (m.immune && this.now > (this.immuneHint || 0)) { this.immuneHint = this.now + 3; this.hintMsg = 'IMMUNE — Brood riders can\'t be hurt while they ride the Titan'; this.hintUntil = this.now + 2; }
+      if (m.immune && this.now > (this.immuneHint || 0)) { this.immuneHint = this.now + 3; this.hintMsg = m.immune === 'ward' ? 'IMMUNE — the Gravekeeper\'s ward holds while any grave is open: seal them with CONES' : 'IMMUNE — Brood riders can\'t be hurt while they ride the Titan'; this.hintUntil = this.now + 2; }
       // your hits: special sound for headshot kills, a "dink" off a helmet, a ding for other headshots
       if (m.part === 'head' && m.w !== 'knife') {
         this.sound.play(m.hp <= 0 ? 'headshot_kill' : m.helm ? 'dink' : 'headshot', { vol: 1 });
@@ -422,7 +423,7 @@ export class Game {
       return;
     }
     if (this.ui === 'smith') {
-      if (act === 'backpack' || act === 'interact') this.holdout.closeSmith();
+      if (act === 'backpack' || act === 'interact' || act === 'turretUp') this.holdout.closeSmith();
       else if (code === 'Mouse0') this.vClick();
       else if (code === 'WheelUp' || code === 'WheelDown') this.vScroll(code);
       return;
@@ -436,13 +437,13 @@ export class Game {
     }
     if (this.ui === 'map') {
       const mm = this.holdout.minimap;
-      if (act === 'map' || act === 'interact') mm.toggle(false);
+      if (act === 'map' || act === 'interact' || smartKey(this.hud.settings.binds, code)) mm.toggle(false);
       else if (code === 'Mouse0' && this.vcur) mm.press(...this.vcur);
       else if ((code === 'WheelUp' || code === 'WheelDown') && this.vcur) mm.zoom(code === 'WheelDown' ? 1 : -1, ...this.vcur);
       return;
     }
     if (this.ui === 'bag') {
-      if (act === 'backpack' || (act === 'interact' && this.holdout.bagAtChest)) this.holdout.closeBag();
+      if (act === 'backpack' || (act === 'interact' && (this.holdout.bagAtChest || smartKey(this.hud.settings.binds, code)))) this.holdout.closeBag();
       else if (act === 'flashlight') this.holdout.invUI.toggleLock(this.vcur);
       else if (code === 'Mouse0' && this.vcur) this.holdout.invUI.down(...this.vcur, this.input.down('ShiftLeft') || this.input.down('ShiftRight'));
       else if (code === 'WheelUp' || code === 'WheelDown') this.vScroll(code);
@@ -487,7 +488,8 @@ export class Game {
 
   update(dt) {
     const pl = this.player, inp = this.input, now = this.now;
-    for (const code of inp.takePressed()) this.onAction((this.holdout?.build.active && this.buildMap[code]) || this.codeMap[code], code);
+    const ronin = this.holdout?.cls === 'ronin'; // the dash may share hotbar slot 4-6's key (hud.js keyAction)
+    for (const code of inp.takePressed()) this.onAction((this.holdout?.build.active && this.buildMap[code]) || keyAction(this.codeMap, this.hud.settings.binds, code, ronin), code);
 
     const [mx, my] = inp.takeMouse();
     const free = !this.ui && inp.locked && !this.intro; // inactive during the intro flyover

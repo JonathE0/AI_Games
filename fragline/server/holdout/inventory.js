@@ -2,9 +2,9 @@
 // typed ammo and building materials as plain counters, the shop at the Core, the team chest (a shared
 // 18-slot grid plus pooled money / materials / ammo), ground pickups and loot spilling. Server-authoritative.
 import { WEAPONS } from '../../shared/weapons.js';
-import { AMMO, AMMO_IDS, ITEMS, POWERUPS, MAT_CAP, MONEY_CAP, SHOP_RARITY, START_AMMO, shopEntry, ammoCap, elementPrice, RARITY, rarityCost, sellPrice, itemValue, TEAM_UPS, ADREN_CARRY } from '../../shared/holdout.js';
-import { ELEMENTS } from '../../shared/elements.js';
-import { INV_SIZE, HOTBAR, STASH_SIZE, SACK_SIZE, ARMOR, ARMOR_SLOTS, ATTACH, stackMax, magFor, kindOf, placeItem, countIn, tierCost, itemName, isConsumable, fits } from '../../shared/items.js';
+import { AMMO, AMMO_IDS, ITEMS, POWERUPS, MAT_CAP, MONEY_CAP, SHOP_RARITY, START_AMMO, shopEntry, ammoCap, elementPrice, RARITY, rarityCost, sellPrice, itemValue, TEAM_UPS, adrenCarry } from '../../shared/holdout.js';
+import { ELEMENT_IDS } from '../../shared/elements.js';
+import { INV_SIZE, HOTBAR, STASH_SIZE, SACK_SIZE, ARMOR, ARMOR_SLOTS, ATTACH, stackMax, magFor, kindOf, placeItem, countIn, tierCost, itemName, isConsumable, fits, hotbarFor, deadSlot } from '../../shared/items.js';
 import { MAT_IDS } from '../../shared/build.js';
 import { nextUid } from '../baseRoom.js';
 import { P, topAt } from '../../shared/physics.js';
@@ -62,8 +62,11 @@ export function giveItem(p, item) {
     if (!left) return null;
     item = left;
   }
-  return placeItem(p.inv, item);
+  return placeItem(p.inv, item, HOTBAR, p.cls); // never into a kit's closed hotbar slots (the Ronin's 4-6)
 }
+// The Ronin's katana is bound to his hotbar slot 1 (server/holdout/ronin.js): never moved, dropped, sold, stashed or unlocked.
+const bound = it => it?.id === 'katana';
+const BOUND = "The Ronin's katana is bound to hotbar slot 1";
 
 // Add up to the backpack cap. Returns how many actually fit.
 export function addAmmo(p, type, n) {
@@ -155,12 +158,12 @@ export class Inventory {
     if (pk.kind === 'it') {
       const it = pk.item, before = it.n;
       if (it.kind === 'adrenaline') {
-        const cap = Math.max(0, ADREN_CARRY - countOf(p, it.id));
-        if (!cap) { room.send(p, { t: 'deny', text: `You can carry ${ADREN_CARRY} Adrenaline Shots` }); return false; }
+        const cap = Math.max(0, adrenCarry(p.cls) - countOf(p, it.id));
+        if (!cap) { room.send(p, { t: 'deny', text: `You can carry ${adrenCarry(p.cls)} Adrenaline Shots` }); return false; }
         if (it.n > cap) {
           const got = cap - (giveItem(p, { ...it, uid: nextUid(), n: cap })?.n ?? 0);
           if (got > 0) room.send(p, { t: 'got', it: { ...it, n: got } });
-          room.send(p, { t: 'deny', text: `You can carry ${ADREN_CARRY} Adrenaline Shots` });
+          room.send(p, { t: 'deny', text: `You can carry ${adrenCarry(p.cls)} Adrenaline Shots` });
           it.n = before - got;
           return false;
         }
@@ -168,7 +171,7 @@ export class Inventory {
       const left = giveItem(p, it);
       if (!left) { room.send(p, { t: 'got', it }); return true; }
       if (it.kind === 'gun' || stackMax(it) === 1) {
-        const slot = held >= 0 && held < HOTBAR ? held : 0, old = p.inv[slot];
+        const slot = held >= 0 && held < hotbarFor(p.cls) ? held : 0, old = p.inv[slot];
         if (old?.locked) { room.send(p, { t: 'deny', text: 'Inventory full — the item in your hand is locked' }); return false; }
         p.inv[slot] = it;
         if (old) this.dropNear(p, old);
@@ -264,6 +267,8 @@ export class Inventory {
     const takingChestSniper = a.box === 's' && b.box !== 's' && src.kind === 'gun' && src.chestGift;
     if (takingChestSniper && room.chestSniperTaken?.has(p.id)) return deny('You already grabbed a sniper from the chest this wave');
     if (b.box === 'k' && !isConsumable(src)) return deny('The sack only holds Adrenaline Shots');
+    if (bound(src) || bound(dst)) return deny(BOUND);
+    if (b.box === 'i' && deadSlot(p.cls, b.key)) return deny('The Ronin only has 3 hotbar slots');
     // an attachment dropped on a gun gets fitted (whatever was in that slot comes back) — an upgrade, so a lock on either side doesn't block it
     if (src.kind === 'attach' && dst?.kind === 'gun' && b.box !== 'a') {
       const slot = ATTACH[src.id].slot, old = dst.att?.[slot];
@@ -280,13 +285,14 @@ export class Inventory {
     if (a.box === 'a' && dst && (dst.kind !== 'armor' || ARMOR[dst.id].slot !== a.key)) return deny('That goes in another slot');
     // pulling Adrenaline Shots out of the team chest still respects the carry cap — move only up to it
     if (src.kind === 'adrenaline' && a.box === 's' && b.box !== 's') {
-      const cap = ADREN_CARRY - countOf(p, src.id);
-      if (cap <= 0) return deny(`You can carry ${ADREN_CARRY} Adrenaline Shots`);
+      const cap = adrenCarry(p.cls) - countOf(p, src.id);
+      if (cap <= 0) return deny(`You can carry ${adrenCarry(p.cls)} Adrenaline Shots`);
       if (src.n > cap) {
-        if (dst && dst.id !== src.id) return deny(`You can carry ${ADREN_CARRY} Adrenaline Shots`);
-        if (dst) dst.n += cap; else this.set(p, b, { ...src, uid: nextUid(), n: cap });
-        src.n -= cap;
-        room.send(p, { t: 'deny', text: `You can carry ${ADREN_CARRY} Adrenaline Shots` });
+        if (dst && dst.id !== src.id) return deny(`You can carry ${adrenCarry(p.cls)} Adrenaline Shots`);
+        const k = dst ? Math.min(cap, stackMax(dst) - dst.n) : cap; // the cap is two stacks: never overfill the one it lands on
+        if (dst) dst.n += k; else this.set(p, b, { ...src, uid: nextUid(), n: k });
+        src.n -= k;
+        if (k === cap) room.send(p, { t: 'deny', text: `You can carry ${adrenCarry(p.cls)} Adrenaline Shots` });
         return this.changed(p, a, b);
       }
     }
@@ -312,7 +318,7 @@ export class Inventory {
     if (!r || r.box === 's' || !p.alive || p.downed) return;
     const it = this.get(p, r);
     if (!it) return;
-    if (it.locked) return this.room.send(p, { t: 'deny', text: 'Locked — press your lock key to unlock' });
+    if (it.locked) return this.room.send(p, { t: 'deny', text: bound(it) ? BOUND : 'Locked — press your lock key to unlock' });
     const n = Math.max(1, Math.min(it.n ?? 1, m.n | 0 || it.n || 1));
     let out = it;
     if ((it.n ?? 1) > n) { it.n -= n; out = { ...it, uid: nextUid(), n }; }
@@ -333,6 +339,7 @@ export class Inventory {
     if (!r || !p.alive) return;
     const it = this.get(p, r);
     if (!it) return;
+    if (bound(it)) return this.room.send(p, { t: 'deny', text: BOUND });
     it.locked = !it.locked;
     this.room.sendInv(p);
     this.room.send(p, { t: 'msg', text: `${itemName(it)} ${it.locked ? 'locked' : 'unlocked'}` });
@@ -354,14 +361,14 @@ export class Inventory {
     if (!e) return;
     if (!room.canBuy(p)) return deny('Buy inside the ring around the Core');
     if (e.kind === 'power' && room.powerupRunning(id)) return deny('Already active');
-    const withEl = e.kind === 'gun' && ELEMENTS[el] ? el : null;
+    const withEl = e.kind === 'gun' && ELEMENT_IDS.includes(el) ? el : null; // never Toxic: that's a Blacksmith milestone
     const price = withEl ? e.price + elementPrice(id) : e.price;
     const payer = bank ? this.stash : p;
     if (payer.money < price) return deny(bank ? 'The team bank is short' : 'Not enough money');
     if (e.kind === 'gun') {
       const g = makeGun(id, SHOP_RARITY, 1, withEl); // duplicates are fine: a free hotbar slot, else the backpack, else swap
-      const i = slot >= 0 && slot < HOTBAR ? slot : 0;
-      if (!fits(p.inv, p.sack, g) && p.inv[i]?.locked) return deny('Inventory full — the item in your hand is locked');
+      const i = slot >= 0 && slot < hotbarFor(p.cls) ? slot : 0;
+      if (!fits(p.inv, p.sack, g, p.cls) && p.inv[i]?.locked) return deny('Inventory full — the item in your hand is locked');
       if (giveItem(p, g)) { // full: swap with the gun in hand
         const old = p.inv[i];
         p.inv[i] = g;
@@ -370,8 +377,8 @@ export class Inventory {
     } else if (e.kind === 'ammo') {
       if (!addAmmo(p, e.type, AMMO[e.type].pack)) return deny('That ammo is full');
     } else if (e.kind === 'item') {
-      const cap = id === 'adrenaline' ? ADREN_CARRY : ITEMS[id].max * 2;
-      if (countOf(p, id) >= cap) return deny(id === 'adrenaline' ? `You can carry ${ADREN_CARRY} Adrenaline Shots` : `You can carry ${cap}`);
+      const cap = id === 'adrenaline' ? adrenCarry(p.cls) : ITEMS[id].max * 2;
+      if (countOf(p, id) >= cap) return deny(id === 'adrenaline' ? `You can carry ${adrenCarry(p.cls)} Adrenaline Shots` : `You can carry ${cap}`);
       if (giveItem(p, makeItem(id, 1))) return deny('Inventory full');
     } else if (e.kind === 'armor') {
       const a = makeArmor(id, 1), where = ARMOR[id].slot;
@@ -391,8 +398,9 @@ export class Inventory {
     const room = this.room, it = p.inv.find(x => x && x.uid === m.uid) ?? ARMOR_SLOTS.map(s => p.armor[s]).find(x => x?.uid === m.uid);
     const deny = text => room.send(p, { t: 'deny', text });
     if (!it || (it.kind !== 'gun' && it.kind !== 'armor')) return;
+    if (bound(it)) return deny('The katana grows through its own tree at the Blacksmith');
     const to = (it.tier ?? 1) + 1;
-    if (to > 3) return deny('Already tier III');
+    if (to > 3) return deny(it.kind === 'gun' ? 'Tier IV and V are Blacksmith milestones' : 'Already tier III');
     if (to === 3 && !atSmith) return deny('Tier III is forged by the Blacksmith');
     if (!atSmith && !room.canBuy(p)) return deny('Upgrade inside the ring around the Core');
     const cost = tierCost(it, to);
@@ -438,7 +446,7 @@ export class Inventory {
     if (idx < 0 && p.sack) { idx = p.sack.findIndex(x => x?.uid === m.uid); from = p.sack; }
     if (idx < 0) return;
     const it = from[idx], price = sellPrice(it);
-    if (it.locked) return deny('Locked — press your lock key to unlock');
+    if (it.locked) return deny(bound(it) ? BOUND : 'Locked — press your lock key to unlock');
     from[idx] = null;
     p.money = Math.min(MONEY_CAP, p.money + price);
     p.buyback = { item: it, price }; // only the last sale is kept
@@ -452,7 +460,7 @@ export class Inventory {
     if (!bb) return;
     if (!this.nearBanker(p)) return deny('Talk to the Banker to sell');
     if (p.money < bb.price) return deny('Not enough money');
-    if (!fits(p.inv, p.sack, bb.item)) return deny('Inventory full');
+    if (!fits(p.inv, p.sack, bb.item, p.cls)) return deny('Inventory full');
     p.money -= bb.price;
     giveItem(p, bb.item);
     p.buyback = null;

@@ -4,11 +4,11 @@
 // drop them outside the window to throw them on the ground, shift-click to quick-move. The server checks
 // every move; this only draws and asks.
 import { WEAPONS, BOSS_PERKS } from '/shared/weapons.js';
-import { AMMO, AMMO_IDS, ITEMS, ARMOR, ATTACH, CLASSES, ammoCap } from '/shared/holdout.js';
+import { AMMO, AMMO_IDS, ITEMS, ARMOR, ATTACH, CLASSES, GUN_MODS, ammoCap } from '/shared/holdout.js';
 import { ELEMENTS } from '/shared/elements.js';
-import { HOTBAR, INV_SIZE, STASH_SIZE, SACK_SIZE, ARMOR_SLOTS, TIERS, TIER_COLORS, magFor, gunMult, itemName, armorStats, damageReduction, tierCost } from '/shared/items.js';
+import { HOTBAR, INV_SIZE, STASH_SIZE, SACK_SIZE, ARMOR_SLOTS, TIERS, TIER_COLORS, magFor, gunMult, itemName, armorStats, damageReduction, tierCost, hotbarFor } from '/shared/items.js';
 import { BMATS, MAT_IDS } from '/shared/build.js';
-import { itemLook, slotHTML, itemDesc } from './holdout_ui.js';
+import { itemLook, slotHTML, itemDesc, masteryText, katanaText } from './holdout_ui.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
@@ -66,7 +66,7 @@ export class InventoryUI {
     const figure = `<div class="figure${cls ? ' ' + h.cls : ''}"><i class="fh"></i><i class="fb"></i><i class="fl"></i><em>${esc(cls?.name ?? 'No class')}</em></div>`;
     const grid = (from, to, prefix, items) => Array.from({ length: to - from }, (_, k) => this.slot(prefix + (from + k), items[from + k])).join('');
     const keys = h.hotkeys();
-    const hot = Array.from({ length: HOTBAR }, (_, k) => this.slot('i' + k, h.inv[k], `<b class="key">${keys[k]}</b>`)).join('');
+    const hot = Array.from({ length: hotbarFor(h.cls) }, (_, k) => this.slot('i' + k, h.inv[k], `<b class="key">${keys[k]}</b>`)).join('');
     const sackKeys = [1, 2, 3, 4].map(i => h.key('sack' + i));
     const sack = Array.from({ length: SACK_SIZE }, (_, k) => this.slot('k' + k, h.sack[k], `<b class="key">${sackKeys[k]}</b>`)).join('');
     const counters = [
@@ -100,11 +100,18 @@ export class InventoryUI {
     const h = this.h, ref = this.sel, it = ref && this.item(ref);
     if (!it) return '<span class="muted">Click an item to see what it does.</span>';
     const parts = [`<b style="color:${itemLook(it).color}">${esc(itemName(it))}</b>`], acts = [];
+    if (it.id === 'katana') { // bound to the Ronin: its own numbers and tree, never dropped, sold or moved
+      parts.push(katanaText(it), `<span class="muted">${masteryText(it)} · grows at the Blacksmith (Katana) · bound to hotbar slot 1</span>`);
+      return `<div>${parts.join('<br>')}</div>`;
+    }
     if (it.kind === 'gun') {
       const w = WEAPONS[it.id];
       const dmg = Math.round(w.dmg * gunMult(it) * (h.cls === 'assault' ? 1.2 : 1));
       parts.push(`${dmg}${w.pellets > 1 ? `×${w.pellets}` : ''} dmg · ${w.rpm} rpm · ${magFor(it, h.cls)} mag · ${AMMO[w.ammo]?.name ?? ''}`);
-      if (it.el) parts.push(`<span style="color:${ELEMENTS[it.el].color}">${ELEMENTS[it.el].name}</span> rounds`);
+      const els = it.els ?? (it.el ? [it.el] : []);
+      if (els.length) parts.push(els.map(e => `<span style="color:${ELEMENTS[e].color}">${ELEMENTS[e].name}</span>`).join(' + ') + ' rounds');
+      if (it.mods?.length) parts.push('Mods: ' + it.mods.map(id => `${GUN_MODS[id].name} <span class="muted">(${GUN_MODS[id].desc})</span>`).join(', '));
+      parts.push(`<span class="muted">${masteryText(it)}</span>`);
       if (w.boss) parts.push(`<span class="muted">${BOSS_PERKS[w.id]}</span>`);
       const att = Object.values(it.att || {}).filter(Boolean).map(a => ATTACH[a]?.name);
       if (att.length) parts.push('Fitted: ' + att.join(', '));
@@ -128,7 +135,7 @@ export class InventoryUI {
       const to = (it.tier ?? 1) + 1, c = tierCost(it, to);
       if (to === 2) acts.push(btn(`Upgrade to tier II · $${c.money}`, { act: 'tier' }, '', !h.canBuy() || this.g.me.money < c.money));
       else acts.push(`<span class="muted">Tier III: the Blacksmith</span>`);
-    }
+    } else if (it.kind === 'gun' && (it.tier ?? 1) < 5) acts.push('<span class="muted">Tier IV / V: Blacksmith milestones</span>');
     if (!ref.startsWith('s')) acts.push(btn((it.n ?? 1) > 1 ? 'Drop 1' : 'Drop', { act: 'drop1' }, '', it.locked), (it.n ?? 1) > 1 ? btn('Drop all', { act: 'drop' }, '', it.locked) : '');
     if (it.locked) parts.push(`<span class="muted">Locked — press ${h.key('flashlight')} to unlock</span>`);
     return `<div>${parts.join('<br>')}</div><div class="acts">${acts.join('')}</div>`;
@@ -158,7 +165,7 @@ export class InventoryUI {
 
   // Minecraft-style: hovering a slot (any box, including the team chest) and pressing 1-6 swaps it into that hotbar slot.
   hotkeySwap(idx, vcur) {
-    if (this.drag) return;
+    if (this.drag || idx >= hotbarFor(this.h.cls)) return; // the Ronin's slots 4-6 are closed
     const ref = this.refUnder(vcur);
     if (!ref || ref === 'i' + idx) return;
     this.g.net.send({ t: 'move', from: ref, to: 'i' + idx });
@@ -227,7 +234,7 @@ export class InventoryUI {
     else if (ref.startsWith('a:')) { const i = free(h.inv, HOTBAR, INV_SIZE); if (i >= 0) to = 'i' + i; }
     else if (this.atChest) { const i = free(h.stash.items || [], 0, STASH_SIZE); if (i >= 0) to = 's' + i; }
     else if (it.kind === 'armor') to = 'a:' + ARMOR[it.id].slot;
-    else { const n = +ref.slice(1), i = n < HOTBAR ? free(h.inv, HOTBAR, INV_SIZE) : free(h.inv, 0, HOTBAR); if (i >= 0) to = 'i' + i; }
+    else { const n = +ref.slice(1), i = n < HOTBAR ? free(h.inv, HOTBAR, INV_SIZE) : free(h.inv, 0, hotbarFor(h.cls)); if (i >= 0) to = 'i' + i; }
     if (to) this.g.net.send({ t: 'move', from: ref, to });
   }
 

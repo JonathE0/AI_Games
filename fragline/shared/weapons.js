@@ -170,6 +170,10 @@ gun('kinetic', { name: 'Shockwave Blaster', short: 'Shockwave', cat: 'shotgun', 
 // the Stalker's blade: a wide slash that hits everything in front of you, and you run faster holding it
 gun('blade', { name: 'Slasher Blade', short: 'Blade', cat: 'melee', model: 'blade', snd: 'knife', price: 0, pellets: 6, arc: 120, speedBuff: 1.15,
   dmg: 60, dmgAlt: 95, pen: 0.9, range: 1, rpm: 100, mag: 0, reload: 0, deploy: 0.4, speed: 6.35, reach: 2.8, acc: null, recoil: [[0, 0]], idxRecover: 1 });
+// the Ronin's Zinkonium Katana: never sold or looted, locked in his hotbar slot 1 — its moves and numbers live in
+// shared/holdout.js KATANA (server/holdout/ronin.js)
+gun('katana', { name: 'Zinkonium Katana', short: 'Katana', cat: 'melee', model: 'katana', snd: 'knife', price: 0, arc: 110,
+  dmg: 95, dmgAlt: 150, pen: 1, range: 1, rpm: 170, mag: 0, reload: 0, deploy: 0.35, speed: 6.35, reach: 3, acc: null, recoil: [[0, 0]], idxRecover: 1 });
 gun('minigun', { name: 'Minigun', short: 'Minigun', cat: 'rifle', model: 'minigun', snd: 'minigun', ammo: 'medium', auto: true, spin: 0.6, price: 0, wallPen: 1.5,
   dmg: 22, head: 1.5, pen: 0.85, range: 0.93, rpm: 1000, mag: 200, reload: 4.2, deploy: 1.0, speed: 4.6,
   acc: { stand: 1.1, crouch: 0.9, move: 0.8, air: 2.5, fire: 0.05, fireMax: 1.6, recover: 0.4 }, recoil: soft(200, 1.4, 0.3) });
@@ -189,6 +193,16 @@ gun('mawfang', { name: 'Maw Fang', short: 'Maw Fang', cat: 'shotgun', model: 'sh
   acc: { stand: 0.3, crouch: 0.25, move: 0.8, air: 2, fire: 0, fireMax: 0, recover: 0.5 }, recoil: pattern(12, [[0, 0, 0], [1, 0, 2.4], [11, 0, 3]]), idxRecover: 3 });
 gun('cleaver', { name: 'Alpha Cleaver', short: 'Cleaver', cat: 'melee', model: 'blade', snd: 'knife', boss: true, price: 0, pellets: 8, arc: 150, speedBuff: 1.15, knockdown: true,
   dmg: 110, dmgAlt: 170, pen: 0.9, range: 1, rpm: 100, mag: 0, reload: 0, deploy: 0.4, speed: 6.35, reach: 3.4, acc: null, recoil: [[0, 0]], idxRecover: 1 });
+// the Gravekeeper's lightning rifle — chain: every hit arcs to the 2 nearest zombies like shock rounds; pool: every
+// 4th shot that hits leaves a 2 s shock pool that only hurts zombies (server/holdout/gravekeeper.js knellPool)
+gun('knell', { name: 'Knell', short: 'Knell', cat: 'rifle', model: 'm4', snd: 'm4a4', ammo: 'medium', auto: true, boss: true, price: 0, wallPen: 2,
+  dmg: 52, head: 2, pen: 0.9, range: 0.97, rpm: 330, mag: 45, reload: 2.4, deploy: 0.6, speed: 5.85,
+  chain: true, pool: { every: 4, r: 2.5, time: 2, dps: 60 },
+  acc: { stand: 0.28, crouch: 0.2, move: 1.1, air: 3, fire: 0.18, fireMax: 2.2, recover: 0.35 }, recoil: soft(45, 1.7, 0.25) });
+// the Behemoth's launcher — bomblets: each rocket splits into 3 cluster bomblets on impact (server/holdout/combat.js)
+gun('siegebreaker', { name: 'Siegebreaker', short: 'Siegebreaker', cat: 'launcher', model: 'rocket', snd: 'rocket', ammo: 'rockets', projectile: 'rocket', boss: true, price: 0,
+  dmg: 280, splash: 4.5, bomblets: 3, head: 1, pen: 1, range: 1, rpm: 60, mag: 3, reload: 2.4, deploy: 0.8, speed: 5.3,
+  acc: { stand: 0.2, crouch: 0.15, move: 0.8, air: 2, fire: 0, fireMax: 0, recover: 0.5 }, recoil: pattern(3, [[0, 0, 0], [1, 0, 3], [2, 0, 3]]), idxRecover: 3 });
 
 // Boss gun perk blurbs, appended to the shop/inventory gun description (holdout_ui.js, inventory_ui.js).
 export const BOSS_PERKS = {
@@ -196,6 +210,8 @@ export const BOSS_PERKS = {
   broodlauncher: 'BOSS · scatters acid bomblets on impact',
   mawfang: 'BOSS · lifesteal · every 5th shot pulls zombies in',
   cleaver: 'BOSS · knocks down everything it hits',
+  knell: 'BOSS · hits chain to 2 zombies · every 4th hit leaves a shock pool',
+  siegebreaker: 'BOSS · rockets split into 3 cluster bomblets on impact',
 };
 
 // Holdout: holding a non-gun hotbar item (grenade, adrenaline shot, trap…) — nothing to shoot, the item gets used.

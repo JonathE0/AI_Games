@@ -162,9 +162,10 @@ test('grenades, molotovs and freeze grenades hurt only zombies and credit the th
   assert.equal(p.stats.kills, 1);
   const f = zombieAt(room, 0, -10);
   f.hp = f.maxHp = 5000;
+  f.aggroBlock = T + 1e9; // heads for the Core, not the thrower: only the explosives are under test
   T += 1000;
   room.handle(p, { t: 'throw', item: 'freeze', o: [0, 1.6, -6], v: [0, 1, -6] });
-  advance(room, 900);
+  advance(room, 2400); // lands after ~0.5 s, then 1.5 s in the Blizzard freezes it
   assert.ok(f.frozenUntil > T);
   T += 1000;
   room.handle(p, { t: 'throw', item: 'molotov', o: [0, 1.6, -6], v: [0, 1, -6] });
@@ -214,7 +215,8 @@ test('traps and turrets defend on their own; campfires heal and recharge shields
 test('rescue waves: carry a wounded survivor into the ring and it defends the Core', () => {
   const room = started(new HoldoutRoom('R', {}));
   const a = join(room, 'A'), p = a.player;
-  room.startWave(3); room.director.queue = [];
+  room.startWave(3);
+  room.director.queue = Array(50).fill('shambler'); room.director.lanes = []; // hold the wave open (no lanes = no spawns) so it cannot clear mid-test
   assert.equal(room.survivors.list.size, 2);
   const sv = [...room.survivors.list.values()][0];
   assert.ok(OUTPOST_SHELTERS.some(s => Math.hypot(s.x - sv.pos[0], s.z - sv.pos[2]) < 1));

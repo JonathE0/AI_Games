@@ -2,7 +2,7 @@
 // and turrets, thrown grenades / molotov fires / freeze blasts, rockets, survivors and the Colossus.
 // All of it is driven by server messages; this file only draws and animates.
 import * as THREE from 'three';
-import { RARITY, AMMO, ITEMS, SURVIVOR_CLASSES, survivorGun } from '/shared/holdout.js';
+import { RARITY, AMMO, ITEMS, SURVIVOR_CLASSES, TURRET_TYPES, BARRIER, survivorGun } from '/shared/holdout.js';
 import { ELEMENTS } from '/shared/elements.js';
 import { TIER_COLORS, itemName } from '/shared/items.js';
 import { OUTPOST } from '/shared/outpost.js';
@@ -31,6 +31,55 @@ function glowTexture() {
   const c = cv.getContext('2d'), g = c.createRadialGradient(32, 32, 0, 32, 32, 32);
   g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.4, 'rgba(255,255,255,0.45)'); g.addColorStop(1, 'rgba(255,255,255,0)');
   c.fillStyle = g; c.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(cv);
+}
+
+// The Tank's barrier: a faint honeycomb of energy with a bright rim (tinted per barrier by its material color).
+function barrierTexture() {
+  const cv = document.createElement('canvas'), W = 256, H = 166, R = 13, h = R * Math.sqrt(3);
+  cv.width = W; cv.height = H;
+  const c = cv.getContext('2d');
+  c.fillStyle = 'rgba(255,255,255,0.16)'; c.fillRect(0, 0, W, H);
+  c.strokeStyle = 'rgba(255,255,255,0.5)'; c.lineWidth = 1.5;
+  for (let col = 0; col * R * 1.5 < W + R; col++) for (let row = -1; row * h < H + h; row++) {
+    const x = col * R * 1.5, y = row * h + (col % 2 ? h / 2 : 0);
+    c.beginPath();
+    for (let k = 0; k <= 6; k++) c.lineTo(x + R * Math.cos((k * Math.PI) / 3), y + R * Math.sin((k * Math.PI) / 3));
+    c.stroke();
+  }
+  c.strokeStyle = '#fff'; c.lineWidth = 7; c.strokeRect(3.5, 3.5, W - 7, H - 7);
+  return new THREE.CanvasTexture(cv);
+}
+
+// Cracks laid over a barrier as it wears down (their opacity follows the damage).
+function crackTexture() {
+  const cv = document.createElement('canvas'), W = 256, H = 166;
+  cv.width = W; cv.height = H;
+  const c = cv.getContext('2d');
+  let seed = 11;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  c.strokeStyle = 'rgba(255,255,255,0.95)'; c.lineWidth = 2; c.lineCap = 'round';
+  for (let k = 0; k < 6; k++) {
+    const ox = 30 + rnd() * (W - 60), oy = 20 + rnd() * (H - 40);
+    for (let j = 0; j < 5; j++) {
+      let x = ox, y = oy, a = rnd() * 6.283;
+      c.beginPath(); c.moveTo(x, y);
+      for (let s = 0; s < 6; s++) { a += (rnd() - 0.5) * 1.1; x += Math.cos(a) * 9; y += Math.sin(a) * 9; c.lineTo(x, y); }
+      c.stroke();
+    }
+  }
+  return new THREE.CanvasTexture(cv);
+}
+
+// A Blizzard's frozen floor: solid rime in the middle fading out at the rim, speckled with frost.
+function frostTexture() {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 128;
+  const c = cv.getContext('2d'), g = c.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,0.9)'); g.addColorStop(0.75, 'rgba(255,255,255,0.6)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = g; c.fillRect(0, 0, 128, 128);
+  c.fillStyle = '#fff';
+  for (let i = 0; i < 260; i++) { const a = Math.random() * 6.283, r = Math.sqrt(Math.random()) * 58; c.fillRect(64 + Math.cos(a) * r, 64 + Math.sin(a) * r, 1.5, 1.5); }
   return new THREE.CanvasTexture(cv);
 }
 
@@ -84,6 +133,7 @@ export class Entities {
     this.sphere = new THREE.SphereGeometry(1, 16, 12);
     this.cyl = new THREE.CylinderGeometry(1, 1, 1, 12);
     this.ring = new THREE.RingGeometry(0.45, 0.62, 24).rotateX(-Math.PI / 2);
+    this.torus = new THREE.TorusGeometry(1, 0.07, 6, 24).rotateX(Math.PI / 2);
     this.mats = new Map();
     this.dollarTex = dollarTexture();
     this.pickups = new Map();
@@ -93,6 +143,8 @@ export class Entities {
     this.thrown = new Map();
     this.rockets = new Map();
     this.fires = [];
+    this.snows = [];      // Blizzard fields (freeze grenades)
+    this.barriers = new Map(); // Tank barriers by player id
     this.flashes = [];
     this.survivors = new Map();
     this.sky = null;
@@ -342,12 +394,12 @@ export class Entities {
   }
 
   // ---------- defenses ----------
-  // [id, type, x, y, z, axis, side, pid, owner]
-  addDef([id, type, x, y, z, axis, side, pid, owner]) {
+  // [id, type, x, y, z, axis, side, pid, owner, mods (Blacksmith upgrades)]
+  addDef([id, type, x, y, z, axis, side, pid, owner, mods]) {
     this.removeDef(id);
     const g = new THREE.Group();
     g.position.set(x, y, z);
-    const d = { id, type, pid, side, owner, g, pos: [x, y, z], yaw: 0, fx: 0, head: null };
+    const d = { id, type, pid, side, owner, g, pos: [x, y, z], yaw: 0, fx: 0, head: null, mods: mods || {} };
     if (type === 'spikes') {
       this.mesh(this.box, 0x3a3d42, g, [0, 0.03, 0], [3.8, 0.06, 3.8]);
       const spikes = new THREE.Group();
@@ -423,11 +475,48 @@ export class Entities {
     }
     this.root.add(g);
     this.defs.set(id, d);
+    if (mods) this.defMods(d);
+  }
+
+  // Blacksmith upgrades you can see (d.mods): an extra barrel per damage level, a scope dish that grows with range, a
+  // spinning motor ring per fire-rate level, ammo boxes for capacity, armour plates for plating (up to 4 of each shown)
+  // and an orange / blue glow for incendiary / frost rounds. Rebuilt when they change; shared geometry and cached
+  // materials except the glow sprite's own material.
+  defMods(d) {
+    for (const o of d.ups ?? []) o.removeFromParent();
+    d.glow?.material.dispose();
+    Object.assign(d, { ups: [], motors: [], glow: null });
+    const md = d.mods ?? {}, head = d.head, g = d.g, lv = k => Math.min(4, md[k] || 0), mortar = d.type === 'mortar';
+    if (!TURRET_TYPES.includes(d.type) || !head) return;
+    const add = (parent, geo, color, pos, scale) => { const m = this.mesh(geo, color, parent, pos, scale); d.ups.push(m); return m; };
+    for (let i = 0; i < lv('dmg'); i++) { // left / right of the main barrel, then a row lower
+      const row = Math.floor(i / 2), x = (i % 2 ? 1 : -1) * (0.2 + 0.1 * row);
+      add(head, this.cyl, 0x1b1d21, [x, mortar ? 0.35 : 0.1 - 0.16 * row, mortar ? -0.05 : -0.5], [0.045, mortar ? 0.8 : 0.5, 0.045]).rotation.x = mortar ? -Math.PI / 3.2 : Math.PI / 2;
+    }
+    if (lv('range')) { // a scope dish on a mast (off to the side of a tesla's ball or a mortar's tube)
+      const s = 1 + 0.25 * (lv('range') - 1), x = d.type === 'tesla' || mortar ? 0.3 : 0;
+      add(head, this.cyl, 0x2b2f35, [x, 0.3, 0.12], [0.03, 0.22, 0.03]);
+      add(head, this.cyl, 0xc9d1db, [x, 0.45, 0.12], [0.2 * s, 0.03, 0.2 * s]).rotation.x = -0.5;
+    }
+    for (let i = 0; i < lv('rate'); i++) { // a band with cogs round the column, so the spin shows
+      const ring = new THREE.Group();
+      ring.position.y = 0.25 + 0.16 * i;
+      this.mesh(this.torus, 0xd9a441, ring, [0, 0, 0], [0.52, 0.52, 0.52]);
+      for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2; this.mesh(this.box, 0x3a3f46, ring, [Math.cos(a) * 0.55, 0, Math.sin(a) * 0.55], [0.08, 0.06, 0.08]); }
+      g.add(ring);
+      d.ups.push(ring);
+      d.motors.push(ring);
+    }
+    for (let i = 0; i < lv('cap'); i++) add(g, this.box, 0x4d5a2c, [0.4, 0.1 + 0.19 * i, 0.5], [0.26, 0.17, 0.2]);
+    for (let i = 0; i < lv('plate'); i++) { const a = (i * Math.PI) / 2; add(g, this.box, 0x5d646c, [Math.sin(a) * 0.5, 0.42, Math.cos(a) * 0.5], [0.44, 0.5, 0.06]).rotation.y = a; }
+    const round = md.inc ? 0xff8a2a : md.frost ? 0x5ab8ff : 0;
+    if (round) { d.glow = this.sprite(round, 1.1, head, [0, 0.05, -0.35]); d.ups.push(d.glow); }
   }
 
   removeDef(id) {
     const d = this.defs.get(id);
     if (!d) return;
+    d.glow?.material.dispose();
     this.root.remove(d.g);
     this.defs.delete(id);
   }
@@ -504,12 +593,65 @@ export class Entities {
       const disc = this.mesh(new THREE.CircleGeometry(ITEMS.molotov.radius, 24).rotateX(-Math.PI / 2), 0xff7a2a, this.root, [p[0], p[1] + 0.04, p[2]], [1, 1, 1], { basic: true, transparent: true, opacity: 0.35, depthWrite: false });
       this.fires.push({ disc, p, until: this.t + (m.left ?? ITEMS.molotov.burn * 1000) / 1000, next: 0 });
       this.sound.play('fire', { pos: p, vol: 1, ref: 4 });
-    } else if (m.item === 'freeze') {
-      this.world.burst(p, [0, 1, 0], 0xbff6ff, 24, 5);
-      this.flashes.push({ s: this.sprite(0x9ff2ff, 8, this.root, p), t: 0.4 });
-      this.sound.play('freeze_blast', { pos: p, vol: 1.2, ref: 5 });
+    } else if (m.item === 'freeze') { // Blizzard: a frozen floor with snow swirling over it while it lasts (m.left: a late join)
+      if (!m.left) {
+        this.world.burst(p, [0, 1, 0], 0xbff6ff, 24, 5);
+        this.flashes.push({ s: this.sprite(0x9ff2ff, 8, this.root, p), t: 0.4 });
+        this.sound.play('freeze_blast', { pos: p, vol: 1.2, ref: 5 });
+      }
+      const F = ITEMS.freeze, disc = new THREE.Mesh(new THREE.CircleGeometry(F.radius, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({
+        map: this.frostTex ??= frostTexture(), color: 0xd4f4ff, transparent: true, opacity: 0.65, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3,
+      }));
+      disc.position.set(p[0], p[1] + 0.04, p[2]);
+      this.root.add(disc);
+      this.snows.push({ disc, p, until: this.t + (m.left ?? F.time * 1000) / 1000, next: 0 });
     }
     return 0;
+  }
+
+  // ---------- Tank barriers: a see-through energy wall in front of its Tank, facing its aim ----------
+  // frac: HP left (0..1) — cracks spread and the tint warms as it drops; a hit flashes it. own: yours (drawn fainter).
+  setBarrier(id, up, frac, own = false) {
+    let b = this.barriers.get(id);
+    if (!up) { if (b) this.removeBarrier(id); return; }
+    if (!b) {
+      const geo = this.barrierGeo ??= new THREE.PlaneGeometry(BARRIER.width, BARRIER.height).translate(0, BARRIER.height / 2, 0);
+      const wall = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: this.barrierTex ??= barrierTexture(), color: 0x6fd8ff, transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }));
+      const cracks = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: this.crackTex ??= crackTexture(), transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+      const g = new THREE.Group();
+      g.add(wall, cracks);
+      this.root.add(g);
+      b = { g, wall, cracks, frac, flash: 0, own };
+      this.barriers.set(id, b);
+    }
+    if (frac < b.frac - 0.001) { b.flash = 1; this.sound.play('impact_m', { pos: [b.g.position.x, b.g.position.y + 1.3, b.g.position.z], vol: 0.8, ref: 3, rate: 0.7 }); }
+    b.frac = frac;
+    b.cracks.material.opacity = Math.min(0.9, Math.max(0, (1 - frac) * 1.3 - 0.15));
+    b.wall.material.color.setHex(frac > 0.5 ? 0x6fd8ff : frac > 0.25 ? 0xffc46f : 0xff6a5a);
+  }
+
+  removeBarrier(id) {
+    const b = this.barriers.get(id);
+    if (!b) return;
+    this.root.remove(b.g);
+    b.wall.material.dispose();
+    b.cracks.material.dispose();
+    this.barriers.delete(id);
+  }
+
+  // every frame: each barrier in front of its owner (you, or a teammate's smoothed position). A teammate not seen yet
+  // (a late join's roster comes after the barrier sync) or down hides theirs until the server says otherwise.
+  updateBarriers(dt, ctx) {
+    for (const [id, b] of this.barriers) {
+      const r = id === ctx.meId ? null : ctx.remotes.get(id);
+      b.g.visible = id === ctx.meId || (!!r && r.alive && !r.downed);
+      if (!b.g.visible) continue;
+      const pos = r ? r.pos : ctx.me, yaw = r ? r.yaw : ctx.meYaw;
+      b.g.position.set(pos[0] - Math.sin(yaw) * BARRIER.dist, pos[1], pos[2] - Math.cos(yaw) * BARRIER.dist);
+      b.g.rotation.y = yaw;
+      b.flash = Math.max(0, b.flash - dt * 4);
+      b.wall.material.opacity = ((b.own ? 0.22 : 0.34) + 0.06 * Math.sin(this.t * 5)) * (1 + b.flash);
+    }
   }
 
   // ---------- the Blacksmith ----------
@@ -744,11 +886,12 @@ export class Entities {
     (this.lasers ??= []).push({ line, z, from, target, until: this.t + ms / 1000, dot: this.sprite(color, night ? 0.55 : 0.35, this.root, target), night });
   }
 
-  // acid (bloater), ink (hexer), fire (pyro), acidz (Brood Launcher bomblets, zombies only) patches
+  // acid (bloater), ink (hexer), fire (pyro), acidz (Brood Launcher bomblets, zombies only) patches, toxic death clouds
   addHazard(m) {
-    const color = { acid: 0x8fe03a, acidz: 0x8fe03a, ink: 0x2a0f3a, fire: 0xff6a1a }[m.k] ?? 0xffffff;
+    const color = { acid: 0x8fe03a, acidz: 0x8fe03a, ink: 0x2a0f3a, fire: 0xff6a1a, toxic: 0x7dff4a, volt: 0x8f7bff, shockz: 0x7fd8ff, ember: 0xff4a12 }[m.k] ?? 0xffffff; // volt: Gravekeeper lightning, shockz: Knell, ember: the katana's Ember Trail
     const disc = this.mesh(new THREE.CircleGeometry(m.r, 28).rotateX(-Math.PI / 2), color, this.root, [m.p[0], Math.max(0, m.p[1]) + 0.05, m.p[2]], [1, 1, 1],
       { basic: true, transparent: true, opacity: m.k === 'ink' ? 0.7 : 0.45, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3 });
+    if (m.k === 'toxic') this.mesh(this.sphere, 0x7dff4a, disc, [0, 0.3, 0], [m.r, 1.3, m.r], { basic: true, transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide }); // a poisoned zombie's death cloud
     if (m.k === 'ink') { // a cloud you can't see through
       this.mesh(this.sphere, 0x14061e, disc, [0, 0.9, 0], [m.r, 1.6, m.r], { basic: true, transparent: true, opacity: 0.62, depthWrite: false, side: THREE.DoubleSide });
     }
@@ -775,7 +918,7 @@ export class Entities {
       if (this.t < h.next) continue;
       h.next = this.t + (h.k === 'ink' ? 0.12 : 0.25);
       const a = Math.random() * 6.28, r = Math.random() * h.r, p = [h.p[0] + Math.cos(a) * r, Math.max(0, h.p[1]) + 0.1, h.p[2] + Math.sin(a) * r];
-      this.world.burst(p, [0, 1, 0], h.k === 'acid' || h.k === 'acidz' ? 0xb8ff5a : h.k === 'ink' ? 0x1a0826 : 0xffa23a, h.k === 'ink' ? 4 : 2, h.k === 'ink' ? 1.2 : 1.8);
+      this.world.burst(p, [0, 1, 0], h.k === 'acid' || h.k === 'acidz' ? 0xb8ff5a : h.k === 'toxic' ? 0x9dff6a : h.k === 'volt' || h.k === 'shockz' ? 0xe4d8ff : h.k === 'ink' ? 0x1a0826 : 0xffa23a, h.k === 'ink' ? 4 : 2, h.k === 'ink' ? 1.2 : 1.8);
     }
     if (this.digs) for (let i = this.digs.length - 1; i >= 0; i--) {
       const d = this.digs[i], k = (this.t - d.t0) / d.T;
@@ -967,6 +1110,8 @@ export class Entities {
         d.head.rotation.y += Math.atan2(Math.sin(want - d.head.rotation.y), Math.cos(want - d.head.rotation.y)) * Math.min(1, dt * 10);
       }
       if (d.type === 'gturret' && d.barrels) d.barrels.rotation.z += dt * (4 + d.fx * 24); // spins fast while firing
+      for (const r of d.motors ?? []) r.rotation.y += dt * (2 + 2 * (d.mods.rate || 0)) * (1 + d.fx * 2); // fire-rate motors
+      if (d.glow) d.glow.material.opacity = 0.6 + 0.3 * Math.sin(this.t * 5 + d.id);
       if (d.type === 'campfire') { d.flame.scale.set(1 + Math.sin(this.t * 13) * 0.08, 1 + Math.sin(this.t * 17) * 0.15, 1); d.light.material.opacity = 0.6 + Math.sin(this.t * 11) * 0.15; }
     }
     if (this.coreCannon) {
@@ -1002,6 +1147,18 @@ export class Entities {
       f.disc.material.opacity = 0.25 + 0.12 * Math.sin(this.t * 9);
       if (this.t > f.next) { f.next = this.t + 0.12; const a = Math.random() * 6.28, rr = Math.random() * ITEMS.molotov.radius; this.world.burst([f.p[0] + Math.cos(a) * rr, f.p[1] + 0.1, f.p[2] + Math.sin(a) * rr], [0, 1, 0], Math.random() < 0.5 ? 0xff8a2a : 0xffc34d, 2, 2.5); }
     }
+    for (let i = this.snows.length - 1; i >= 0; i--) { // Blizzards: the ice fades out over the last second, snow keeps falling till then
+      const s = this.snows[i], left = s.until - this.t;
+      if (left <= 0) { this.root.remove(s.disc); s.disc.geometry.dispose(); s.disc.material.dispose(); this.snows.splice(i, 1); continue; }
+      s.disc.material.opacity = 0.65 * Math.min(1, left);
+      if (this.t < s.next) continue;
+      s.next = this.t + 0.05;
+      for (let k = 0; k < 2; k++) {
+        const a = Math.random() * 6.28, rr = Math.sqrt(Math.random()) * ITEMS.freeze.radius;
+        this.world.burst([s.p[0] + Math.cos(a) * rr, s.p[1] + 1.2 + Math.random() * 1.8, s.p[2] + Math.sin(a) * rr], [0.4, -0.5, 0.2], 0xf2fbff, 1, 0.9);
+      }
+    }
+    this.updateBarriers(dt, ctx);
     for (let i = this.flashes.length - 1; i >= 0; i--) {
       const f = this.flashes[i];
       f.t -= dt;
@@ -1096,6 +1253,9 @@ export class Entities {
     for (const m of [this.thrown, this.rockets]) { for (const o of m.values()) this.root.remove(o.g); m.clear(); }
     for (const f of this.fires) this.root.remove(f.disc);
     this.fires.length = 0;
+    for (const s of this.snows) { this.root.remove(s.disc); s.disc.geometry.dispose(); s.disc.material.dispose(); }
+    this.snows.length = 0;
+    for (const id of [...this.barriers.keys()]) this.removeBarrier(id);
     this.clearSurvivors();
     this.skyEnd();
     if (this.maw) { this.root.remove(this.maw.g); if (this.maw.warn) this.root.remove(this.maw.warn); this.maw = null; }
@@ -1117,5 +1277,8 @@ export class Entities {
     this.glow.dispose();
     this.dollarTex.dispose();
     for (const m of this.mats.values()) m.dispose();
+    for (const id of [...this.barriers.keys()]) this.removeBarrier(id);
+    for (const s of this.snows) { s.disc.geometry.dispose(); s.disc.material.dispose(); }
+    for (const x of [this.barrierGeo, this.barrierTex, this.crackTex, this.frostTex]) x?.dispose();
   }
 }
